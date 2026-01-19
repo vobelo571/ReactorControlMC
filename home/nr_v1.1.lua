@@ -145,7 +145,6 @@ local reactor_rodCount = {}
 local reactor_rodExpected = {}
 local reactor_rodMultiplier = {}
 local reactor_rodLevel = {}
-local reactor_customName = {}
 
 -- forward declaration: start() uses it before the definition block below
 local updateReactorRodsState
@@ -862,28 +861,23 @@ local function drawWidgets()
             buffer.drawText(x + 4,  y + 6,  colors.textclr, "Распад: " .. secondsToHMS(reactor_depletionTime[i] or 0))
             local rodBase = tostring(reactor_rodType[i] or "-")
             local mult = tonumber(reactor_rodMultiplier[i]) or 1
-            local cnt = math.max(0, tonumber(reactor_rodCount[i]) or 0)
-            local exp = math.max(0, tonumber(reactor_rodExpected[i]) or (tonumber(reactor_expectedRods[i]) or 0))
+            local cnt = tonumber(reactor_rodCount[i]) or 0
+            local exp = tonumber(reactor_rodExpected[i]) or (tonumber(reactor_expectedRods[i]) or 0)
             local rodLabel = rodBase
             if rodBase ~= "-" and rodBase ~= "нет" and rodBase ~= "разные" then
                 rodLabel = rodBase .. " x" .. tostring(mult)
             elseif rodBase == "разные" then
                 rodLabel = "разные x" .. tostring(mult)
             end
-
-            -- Основная строка: только количество
-            local countStr = (exp > 0) and (tostring(cnt) .. "/" .. tostring(exp)) or "Пусто"
-            local rodLine = "Стерж: " .. countStr
-            buffer.drawText(x + 4,  y + 7,  colors.textclr, rodLine)
-
-            -- Название стержней ниже
-            if rodLabel ~= "-" then
-                local shortLabel = rodLabel
-                if unicode.len(shortLabel) > 15 then
-                    shortLabel = unicode.sub(shortLabel, 1, 12) .. "..."
-                end
-                buffer.drawText(x + 4,  y + 8,  colors.textclr2, shortLabel)
+            if exp > 0 then
+                rodLabel = rodLabel .. " " .. tostring(cnt) .. "/" .. tostring(exp)
             end
+            local rodLine = "Стерж: " .. rodLabel
+            local maxLine = 17
+            if unicode.len(rodLine) > maxLine then
+                rodLine = unicode.sub(rodLine, 1, maxLine - 3) .. "..."
+            end
+            buffer.drawText(x + 4,  y + 7,  colors.textclr, rodLine)
 
             -- Кнопки (по 1 строке), с отдельным переключателем AUTO для каждого реактора
             local btnX, btnW = x + 1, 19
@@ -1858,6 +1852,9 @@ local function detectReactorRodInfo(reactorNum)
             return
         end
 
+        local slotCount = #rods
+        local presentSlots = 0
+        local presentRods = 0
         local typeCounts = {}
         local multCounts = {}
         local levelCounts = {}
@@ -1884,6 +1881,9 @@ local function detectReactorRodInfo(reactorNum)
             if type(rod) == "table" then
                 local id = extractRodIdentity(rod)
                 if id then
+                    presentSlots = presentSlots + 1
+                    local rodCount = tonumber(rod.size) or tonumber(rod.count) or 1
+                    presentRods = presentRods + rodCount
                     addType(id)
 
                     -- уровень берём по моде среди маленьких чисел в записи rod[...] (включая строковые "6")
@@ -1915,8 +1915,7 @@ local function detectReactorRodInfo(reactorNum)
         if bestLevel < 1 then bestLevel = 1 end
         reactor_rodLevel[reactorNum] = bestLevel
 
-        local slotCount = math.max(bestLevel * 3, #rods)
-        local present = slotCount * bestLevel
+        local present = presentRods
         local expected = slotCount * bestLevel
 
         local bestType, bestTypeCount = nil, 0
@@ -2072,7 +2071,7 @@ local function getReactorRodsNeed(reactorNum)
         end
         if bestLevel < 1 then bestLevel = 1 end
 
-        local desired = math.max(bestLevel * 3, #rods) * bestLevel
+        local desired = (#rods) * bestLevel
         -- восстанавливаем filter из ключа
         for _, rod in ipairs(rods) do
             if type(rod) == "table" then
@@ -2846,21 +2845,6 @@ local function drawSettingsMenu()
 end
 
 -- -----------------------------{RODS ORDER MENU}----------------------------------
-local function showInputDialog(prompt, default)
-    term.setCursor(1, 1)
-    term.clear()
-    print(prompt)
-    if default and default ~= "" then
-        print("Текущее: " .. default)
-    end
-    print("Оставьте пустым для сброса к умолчанию")
-    io.write("> ")
-    local input = io.read()
-    term.clear()
-    term.setCursor(1, 1)
-    return input
-end
-
 local function drawRodsOrderMenu(reactorNum)
     detectReactorRodInfo(reactorNum)
 
@@ -2912,7 +2896,7 @@ local function drawRodsOrderMenu(reactorNum)
         end
     end
 
-    local modalX, modalY, modalW, modalH = 38, 8, 64, 18
+    local modalX, modalY, modalW, modalH = 38, 10, 64, 14
     local old = buffer.copy(1, 1, 160, 50)
     buffer.drawRectangle(1, 1, 160, 50, 0x000000, 0, " ", 0.4)
     buffer.drawRectangle(modalX, modalY, modalW, modalH, 0xcccccc, 0, " ")
@@ -2927,11 +2911,7 @@ local function drawRodsOrderMenu(reactorNum)
 
     removeAllFields()
 
-    local reactorName = reactor_customName[reactorNum] or ("Реактор #" .. reactorNum)
-    buffer.drawText(modalX + 3, modalY + 1, 0x000000, reactorName .. " — Стержни")
-    -- Кнопка изменения названия
-    buffer.drawRectangle(modalX + modalW - 8, modalY + 1, 6, 1, 0x666666, 0, " ")
-    buffer.drawText(modalX + modalW - 7, modalY + 1, 0xffffff, "[✎]")
+    buffer.drawText(modalX + 3, modalY + 1, 0x000000, "Реактор #" .. reactorNum .. " — Стержни")
 
     local cnt = tonumber(reactor_rodCount[reactorNum]) or 0
     local exp = tonumber(reactor_rodExpected[reactorNum]) or 0
@@ -2945,7 +2925,7 @@ local function drawRodsOrderMenu(reactorNum)
         buffer.drawText(x + 5, y, 0x000000, label)
     end
 
-    local rememberX, rememberY = modalX + 3, modalY + 14
+    local rememberX, rememberY = modalX + 3, modalY + 4
     drawCheck(rememberX, rememberY, "Запомнить выбор", remember)
 
     -- Кратность
@@ -2965,8 +2945,8 @@ local function drawRodsOrderMenu(reactorNum)
     end
 
     -- Тип
-    local typesLabelY = modalY + 11
-    local typesY = modalY + 12
+    local typesLabelY = modalY + 9
+    local typesY = modalY + 10
     local t1x, t2x, t3x, t4x = modalX + 3, modalX + 18, modalX + 33, modalX + 48
     local function drawTypeButtons()
         buffer.drawText(modalX + 3, typesLabelY, 0x000000, "Тип:")
@@ -2987,11 +2967,11 @@ local function drawRodsOrderMenu(reactorNum)
     drawTypeButtons()
 
     local btnY = modalY + modalH - 2
-    local btnOrderX, btnCloseX = modalX + 3, modalX + 25
-    buffer.drawRectangle(btnOrderX, btnY, 16, 1, 0x2f8cff, 0, " ")
-    buffer.drawText(btnOrderX, btnY, 0xffffff, shortenNameCentered("Заказать", 16))
-    buffer.drawRectangle(btnCloseX, btnY, 16, 1, 0x444444, 0, " ")
-    buffer.drawText(btnCloseX, btnY, 0xffffff, shortenNameCentered("Закрыть", 16))
+    local btnOrderX, btnCloseX = modalX + 3, modalX + 23
+    buffer.drawRectangle(btnOrderX, btnY, 18, 1, 0x2f8cff, 0, " ")
+    buffer.drawText(btnOrderX, btnY, 0xffffff, shortenNameCentered("Заказать", 18))
+    buffer.drawRectangle(btnCloseX, btnY, 18, 1, 0x444444, 0, " ")
+    buffer.drawText(btnCloseX, btnY, 0xffffff, shortenNameCentered("Закрыть", 18))
 
     buffer.drawText(modalX + 3, modalY + modalH - 1, 0x666666, "Клик вне окна — закрыть")
     buffer.drawChanges()
@@ -3009,22 +2989,12 @@ local function drawRodsOrderMenu(reactorNum)
                 break
             end
 
-            -- Клик по кнопке изменения названия
-            if y == modalY + 1 and x >= modalX + modalW - 8 and x <= modalX + modalW - 3 then
-                local currentName = reactor_customName[reactorNum] or ""
-                local newName = tostring(showInputDialog("Введите название реактора:", currentName) or "")
-                if newName ~= "" then
-                    reactor_customName[reactorNum] = newName
-                else
-                    reactor_customName[reactorNum] = nil
-                end
-                drawRodsOrderMenu(reactorNum)
-            elseif y == rememberY and x >= rememberX and x <= rememberX + 3 then
+            if y == rememberY and x >= rememberX and x <= rememberX + 3 then
                 remember = not remember
                 drawCheck(rememberX, rememberY, "Запомнить выбор", remember)
                 buffer.drawChanges()
             elseif y == btnY then
-                if x >= btnOrderX and x < btnOrderX + 16 then
+                if x >= btnOrderX and x < btnOrderX + 18 then
                     local id = currentSelectedId()
                     if not id then
                         message("Для выбранного типа/кратности нет ID стержня в списке.", colors.msgwarn, 34)
@@ -3036,7 +3006,7 @@ local function drawRodsOrderMenu(reactorNum)
                     buffer.drawChanges()
                     drawWidgets()
                     break
-                elseif x >= btnCloseX and x < btnCloseX + 16 then
+                elseif x >= btnCloseX and x < btnCloseX + 18 then
                     buffer.paste(1, 1, old)
                     buffer.drawChanges()
                     break
@@ -4011,7 +3981,6 @@ local function mainLoop()
     reactor_rodExpected = {}
     reactor_rodMultiplier = {}
     reactor_rodLevel = {}
-    reactor_customName = {}
     
     me_proxy = nil
     me_network = false
