@@ -97,6 +97,9 @@ local reactor_depletionTime = {}
 local reactor_expectedRods = {}
 local reactor_missingRods = {}
 local reactor_rodType = {}
+local reactor_rodCount = {}
+local reactor_rodExpected = {}
+local reactor_rodMultiplier = {}
 local last_me_address = nil
 local me_network = false
 local me_proxy = nil
@@ -787,7 +790,19 @@ local function drawWidgets()
             buffer.drawText(x + 4,  y + 4,  colors.textclr, "Тип: " .. (reactor_type[i] or "-"))
             buffer.drawText(x + 4,  y + 5,  colors.textclr, "Запущен: " .. (reactor_work[i] and "Да" or "Нет"))
             buffer.drawText(x + 4,  y + 6,  colors.textclr, "Распад: " .. secondsToHMS(reactor_depletionTime[i] or 0))
-            local rodLabel = tostring(reactor_rodType[i] or "-")
+            local rodBase = tostring(reactor_rodType[i] or "-")
+            local mult = tonumber(reactor_rodMultiplier[i]) or 1
+            local cnt = tonumber(reactor_rodCount[i]) or 0
+            local exp = tonumber(reactor_rodExpected[i]) or (tonumber(reactor_expectedRods[i]) or 0)
+            local rodLabel = rodBase
+            if rodBase ~= "-" and rodBase ~= "нет" and rodBase ~= "разные" then
+                rodLabel = rodBase .. " x" .. tostring(mult)
+            elseif rodBase == "разные" then
+                rodLabel = "разные x" .. tostring(mult)
+            end
+            if exp > 0 then
+                rodLabel = rodLabel .. " " .. tostring(cnt) .. "/" .. tostring(exp)
+            end
             if unicode.len(rodLabel) > 13 then
                 rodLabel = unicode.sub(rodLabel, 1, 10) .. "..."
             end
@@ -1663,6 +1678,110 @@ local function normalizeRodType(idStr)
     return nil
 end
 
+local function parseRodMultiplierFromText(s)
+    s = tostring(s or ""):lower()
+    if s == "" then return nil end
+
+    -- 16x
+    if s:find("16x") or s:find("x16") or s:find("16%-?крат") or s:find("шестнадцат") or s:find("sixteen") then
+        return 16
+    end
+    -- 4x
+    if s:find("4x") or s:find("x4") or s:find("4%-?крат") or s:find("четвер") or s:find("счетвер") or s:find("quad") then
+        return 4
+    end
+    return nil
+end
+
+local function detectReactorRodInfo(reactorNum)
+    local proxy = reactors_proxy[reactorNum]
+    if not proxy then
+        reactor_rodType[reactorNum] = "-"
+        reactor_rodCount[reactorNum] = 0
+        reactor_rodExpected[reactorNum] = reactor_expectedRods[reactorNum] or 0
+        reactor_rodMultiplier[reactorNum] = 1
+        return
+    end
+
+    local rods = safeCallwg(proxy, "getAllFuelRodsStatus", nil)
+    if type(rods) ~= "table" then
+        reactor_rodType[reactorNum] = "-"
+        reactor_rodCount[reactorNum] = 0
+        reactor_rodExpected[reactorNum] = reactor_expectedRods[reactorNum] or 0
+        reactor_rodMultiplier[reactorNum] = 1
+        return
+    end
+
+    local present = 0
+    local typeCounts = {}
+    local multCounts = {}
+
+    local function addType(rawId)
+        local t = normalizeRodType(rawId) or tostring(rawId or "")
+        if t == "" then return end
+        typeCounts[t] = (typeCounts[t] or 0) + 1
+    end
+
+    local function addMult(m)
+        m = tonumber(m)
+        if not m then return end
+        multCounts[m] = (multCounts[m] or 0) + 1
+    end
+
+    for _, rod in ipairs(rods) do
+        if type(rod) == "table" then
+            local id = extractRodIdentity(rod)
+            if id then
+                present = present + 1
+                addType(id)
+
+                local strings = collectStrings(rod)
+                for _, s in ipairs(strings) do
+                    local m = parseRodMultiplierFromText(s)
+                    if m then
+                        addMult(m)
+                        break
+                    end
+                end
+            end
+        end
+    end
+
+    local expected = #rods
+    local prevExpected = tonumber(reactor_expectedRods[reactorNum]) or 0
+    reactor_expectedRods[reactorNum] = math.max(prevExpected, expected, present)
+
+    local bestType, bestTypeCount = nil, 0
+    local distinctTypes = 0
+    for t, c in pairs(typeCounts) do
+        distinctTypes = distinctTypes + 1
+        if c > bestTypeCount then
+            bestType, bestTypeCount = t, c
+        end
+    end
+
+    local bestMult, bestMultCount = nil, 0
+    for m, c in pairs(multCounts) do
+        if c > bestMultCount then
+            bestMult, bestMultCount = m, c
+        end
+    end
+
+    local rodType
+    if present == 0 then
+        rodType = "нет"
+    elseif distinctTypes > 1 then
+        rodType = "разные"
+    else
+        rodType = bestType or "-"
+    end
+
+    reactor_rodType[reactorNum] = rodType
+    reactor_rodCount[reactorNum] = present
+    reactor_rodExpected[reactorNum] = reactor_expectedRods[reactorNum] or expected
+    reactor_rodMultiplier[reactorNum] = bestMult or 1
+end
+
 local function updateReactorRodsState(reactorNum)
     local proxy = reactors_proxy[reactorNum]
     if not proxy then
@@ -1688,57 +1807,9 @@ local function updateReactorRodsState(reactorNum)
 
     local complete = (reactor_expectedRods[reactorNum] <= 0) or (present >= reactor_expectedRods[reactorNum])
     reactor_missingRods[reactorNum] = not complete
-end
 
-local function detectReactorRodType(reactorNum)
-    local proxy = reactors_proxy[reactorNum]
-    if not proxy then
-        reactor_rodType[reactorNum] = "-"
-        return "-"
-    end
-
-    local rods = safeCallwg(proxy, "getAllFuelRodsStatus", nil)
-    if type(rods) ~= "table" then
-        reactor_rodType[reactorNum] = "-"
-        return "-"
-    end
-
-    local counts = {}
-    local function add(name)
-        name = tostring(name or ""):match("^%s*(.-)%s*$")
-        if name == "" then return end
-        counts[name] = (counts[name] or 0) + 1
-    end
-
-    for _, rod in ipairs(rods) do
-        if type(rod) == "table" then
-            local id = extractRodIdentity(rod)
-            if id then
-                add(id)
-            end
-        end
-    end
-
-    local bestName, bestCount = nil, 0
-    local distinct = 0
-    for name, c in pairs(counts) do
-        distinct = distinct + 1
-        if c > bestCount then
-            bestName, bestCount = name, c
-        end
-    end
-
-    local result
-    if not bestName then
-        result = "нет"
-    elseif distinct > 1 then
-        result = "разные"
-    else
-        result = normalizeRodType(bestName) or bestName
-    end
-
-    reactor_rodType[reactorNum] = result
-    return result
+    -- также обновляем запомненную информацию о типе/кратности/кол-ве
+    detectReactorRodInfo(reactorNum)
 end
 
 local function getReactorRodsNeed(reactorNum)
@@ -3330,7 +3401,7 @@ local function handleTouch(x, y, uuid)
                     drawWidgets()
                     break
                 elseif y == (yw + 9) then
-                    detectReactorRodType(i)
+                    detectReactorRodInfo(i)
                     os.sleep(0.15)
                     drawWidgets()
                     break
@@ -3379,6 +3450,9 @@ local function mainLoop()
     reactor_expectedRods = {}
     reactor_missingRods = {}
     reactor_rodType = {}
+    reactor_rodCount = {}
+    reactor_rodExpected = {}
+    reactor_rodMultiplier = {}
     
     me_proxy = nil
     me_network = false
