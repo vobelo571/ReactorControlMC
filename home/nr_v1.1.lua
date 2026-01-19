@@ -464,25 +464,12 @@ local function initReactors()
 end
 
 local function initMe()
-    me_network = component.isAvailable("me_controller") or component.isAvailable("me_interface")
-    if me_network == true then
-        if component.isAvailable("me_controller") then
-            local addr = component.list("me_controller")()
-            me_proxy = component.proxy(addr)
-            current_me_address = addr
-        elseif component.isAvailable("me_interface") then
-            local addr = component.list("me_interface")()
-            me_proxy = component.proxy(addr)
-            current_me_address = addr
-        else
-            me_proxy = nil
-            current_me_address = nil
-        end
-    else
-        offFluid = true
-        reason = "МЭ не найдена!"
-    end
-    return current_me_address
+    me_network = false
+    me_proxy = nil
+    current_me_address = nil
+    offFluid = false
+    reason = nil
+    return nil
 end
 
 local function initChatBox()
@@ -1211,7 +1198,7 @@ local function drawTimeInfo()
     for i = 0, 35 - 1 do
         buffer.drawText(123 + i, fl_y1+1, colors.bg2, brailleChar(brail_console[2]))
     end
-    buffer.drawText(124, fl_y1, colors.textclr, "МЭ: Обн. ч/з..")
+    buffer.drawText(124, fl_y1, colors.textclr, "МЭ: выкл.")
     buffer.drawText(141, fl_y1, colors.textclr, "Время работы:")
     buffer.drawText(139, fl_y1, colors.bg2, brailleChar(brail_cherta[1]))
     buffer.drawText(139, fl_y1+1, colors.bg2, brailleChar(brail_cherta[2]))
@@ -1291,7 +1278,7 @@ local function drawStatic()
     animatedButton(1, 5, 47, "ⓘ", nil, nil, 4, nil, nil, 0xa91df9, 0x05e2ff)
     animatedButton(1, 13, 44, "Отключить реакторы!", nil, nil, 24, nil, nil, 0xfd3232)
     animatedButton(1, 41, 44, "Запуск реакторов!", nil, nil, 23, nil, nil, 0x35e525)
-    animatedButton(1, 68, 44, "Пр.Обновить МЭ", nil, nil, 18, nil, nil, nil)
+    animatedButton(1, 68, 44, "МЭ: выкл.", nil, nil, 18, nil, nil, nil)
     animatedButton(1, 13, 47, "Рестарт программы.", nil, nil, 24, nil, nil, colors.whitebtn)
     animatedButton(1, 41, 47, "Выход из программы.", nil, nil, 23, nil, nil, colors.whitebtn)
     animatedButton(1, 68, 47, "Метрика: " .. status_metric, nil, nil, 18, nil, nil, colors.whitebtn)
@@ -1489,7 +1476,7 @@ local function drawFluidinfo()
     for i = 0, 35 - 1 do
         buffer.drawText(123 + i, fl_y1, colors.bg2, brailleChar(brail_console[2]))
     end
-    buffer.drawText(124, fl_y1-1, colors.textclr, "Жидкости в МЭ сети:")
+    buffer.drawText(124, fl_y1-1, colors.textclr, "Жидкости МЭ: выкл.")
     
     drawDigit(125, fl_y1+1, brail_fluid, 0x0088ff)
 
@@ -1715,109 +1702,16 @@ local function silentstop(num)
 end
 
 local function updateMeProxy()
-    if component.isAvailable("me_controller") then
-        me_proxy = component.proxy(component.list("me_controller")())
-    elseif component.isAvailable("me_interface") then
-        me_proxy = component.proxy(component.list("me_interface")())
-    else
-        me_proxy = nil
-    end
+    me_proxy = nil
 end
 
 local function checkFluid()
     MeSecond = 0
-    if not me_network then
-        offFluid = true
-        reason = "МЭ не найдена!"
-        fluidInMe = 0
-        drawFluidinfo()
-        return
-    end
-
-    if not me_proxy then
-        updateMeProxy()
-        if not me_proxy then
-            offFluid = true
-            reason = "Нет прокси МЭ!"
-            fluidInMe = 0
-            drawFluidinfo()
-            return
-        end
-    end
-
-    local ok, items = pcall(me_proxy.getItemsInNetwork, { name = "ae2fc:fluid_drop" })
-    if not ok or type(items) ~= "table" then
-        offFluid = true
-        reason = "Ошибка жидкости!"
-        fluidInMe = 0
-        drawFluidinfo()
-        return
-    end
-
-    local targetFluid = "low_temperature_refrigerant"
-    local count = 0
-
-    for _, item in ipairs(items) do
-        if item.label and item.label:find(targetFluid) then
-            count = count + (item.size or 0)
-        end
-    end
-
-    if count == 0 then
-        offFluid = true
-        reason = "Нет хладагента!"
-    end
-
-    if count > maxThreshold then
-        count = lastValidFluid
-    else
-        lastValidFluid = count
-    end
-
-    fluidInMe = count
+    fluidInMe = 0
+    offFluid = false
+    reason = nil
+    ismechecked = false
     drawFluidinfo()
-
-    if fluidInMe <= porog then
-        if ismechecked == false then
-            message("Жидкости в МЭ меньше порога!", colors.msgwarn, 34)
-            for i = 1, reactors do
-                if reactor_type[i] == "Fluid" then
-                    drawStatus(i)
-                    if reactor_work[i] == true then
-                        message("Отключаю жидкостные реакторы...", colors.textclr, 34)
-                        break
-                    end
-                end
-            end
-        end
-        offFluid = true
-        reason = "Нет хладагента!"
-        ismechecked = true
-    else
-        if offFluid == true and starting == true then
-            message("Жидкости хватает, включаю реакторы...", colors.textclr, 34)
-            offFluid = false
-            ismechecked = false
-            for i = 1, reactors do
-                if reactor_type[i] == "Fluid" then
-                    start(i)
-                    reactor_aborted[i] = false
-                    updateReactorData(i)
-                end
-            end
-        end
-        if offFluid == true then 
-            offFluid = false 
-            for i = 1, reactors do
-                if reactor_type[i] == "Fluid" then
-                    if reactor_aborted[i] == true then
-                        reactor_aborted[i] = false
-                        updateReactorData(i)
-                    end
-                end
-            end
-        end
-    end
 end
 
 function onInterrupt()
@@ -1874,19 +1768,6 @@ local function reactorsChanged()
 end
 
 local function meChanged()
-    local current_me_address = nil
-
-    if component.isAvailable("me_controller") then
-        current_me_address = component.list("me_controller")()
-    elseif component.isAvailable("me_interface") then
-        current_me_address = component.list("me_interface")()
-    end
-
-    if last_me_address ~= current_me_address then
-        last_me_address = current_me_address
-        return true
-    end
-
     return false
 end
 
@@ -2851,7 +2732,6 @@ local function handleChatCommand(nick, msg, args)
                 chatBox.say("§aЗапущены: " .. table.concat(running, ", "))
             end
 
-            chatBox.say("§aЖидкости в МЭ: " .. fluidInMe .. " Mb")
             chatBox.say("§aПорог: " .. porog .. " Mb")
             chatBox.say("§aГенерация реакторов: " .. rf .. " RF/t")
             chatBox.say("§aОбщее потребление жидкости реакторами: " .. consumeSecond .. " mB/s")
@@ -3239,12 +3119,11 @@ local function handleTouch(x, y, uuid)
         x >= config.clickArea5.x1 and 
         x <= config.clickArea5.x2 then
         buffer.drawRectangle(67, 44, 20, 3, colors.bg3, 0, " ")
-        animatedButton(1, 68, 44, "Пр.Обновить МЭ", nil, nil, 18, nil, nil, 0x38afff)
-        animatedButton(2, 68, 44, "Пр.Обновить МЭ", nil, nil, 18, nil, nil, 0x38afff)
+        animatedButton(1, 68, 44, "МЭ: выкл.", nil, nil, 18, nil, nil, 0x38afff)
+        animatedButton(2, 68, 44, "МЭ: выкл.", nil, nil, 18, nil, nil, 0x38afff)
         buffer.drawChanges()
-        checkFluid()
         os.sleep(0.2)
-        animatedButton(1, 68, 44, "Пр.Обновить МЭ", nil, nil, 18, nil, nil, nil)
+        animatedButton(1, 68, 44, "МЭ: выкл.", nil, nil, 18, nil, nil, nil)
         buffer.drawChanges()
     elseif
         y >= config.clickArea6.y1 and
