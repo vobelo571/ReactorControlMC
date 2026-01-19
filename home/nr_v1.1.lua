@@ -1547,18 +1547,6 @@ local function normalizeFuelType(value)
     if key:find("ksir") or key:find("viz") then
         return "Ксирд.-Визамиум"
     end
-    if key:find("уран") then
-        return "Уран"
-    end
-    if key:find("мокс") or key:find("mox") then
-        return "MOX"
-    end
-    if key:find("калиф") then
-        return "Калифорний"
-    end
-    if key:find("ксир") or key:find("виз") then
-        return "Ксирд.-Визамиум"
-    end
     return nil
 end
 
