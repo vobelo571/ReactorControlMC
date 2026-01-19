@@ -145,6 +145,7 @@ local reactor_rodCount = {}
 local reactor_rodExpected = {}
 local reactor_rodMultiplier = {}
 local reactor_rodLevel = {}
+local reactor_customName = {}
 
 -- forward declaration: start() uses it before the definition block below
 local updateReactorRodsState
@@ -861,23 +862,28 @@ local function drawWidgets()
             buffer.drawText(x + 4,  y + 6,  colors.textclr, "Распад: " .. secondsToHMS(reactor_depletionTime[i] or 0))
             local rodBase = tostring(reactor_rodType[i] or "-")
             local mult = tonumber(reactor_rodMultiplier[i]) or 1
-            local cnt = tonumber(reactor_rodCount[i]) or 0
-            local exp = tonumber(reactor_rodExpected[i]) or (tonumber(reactor_expectedRods[i]) or 0)
+            local cnt = math.max(0, tonumber(reactor_rodCount[i]) or 0)
+            local exp = math.max(0, tonumber(reactor_rodExpected[i]) or (tonumber(reactor_expectedRods[i]) or 0))
             local rodLabel = rodBase
             if rodBase ~= "-" and rodBase ~= "нет" and rodBase ~= "разные" then
                 rodLabel = rodBase .. " x" .. tostring(mult)
             elseif rodBase == "разные" then
                 rodLabel = "разные x" .. tostring(mult)
             end
-            if exp > 0 then
-                rodLabel = rodLabel .. " " .. tostring(cnt) .. "/" .. tostring(exp)
-            end
-            local rodLine = "Стерж: " .. rodLabel
-            local maxLine = 17
-            if unicode.len(rodLine) > maxLine then
-                rodLine = unicode.sub(rodLine, 1, maxLine - 3) .. "..."
-            end
+
+            -- Основная строка: только количество
+            local countStr = (exp > 0) and (tostring(cnt) .. "/" .. tostring(exp)) or "Пусто"
+            local rodLine = "Стерж: " .. countStr
             buffer.drawText(x + 4,  y + 7,  colors.textclr, rodLine)
+
+            -- Название стержней ниже
+            if rodLabel ~= "-" then
+                local shortLabel = rodLabel
+                if unicode.len(shortLabel) > 15 then
+                    shortLabel = unicode.sub(shortLabel, 1, 12) .. "..."
+                end
+                buffer.drawText(x + 4,  y + 8,  colors.textclr2, shortLabel)
+            end
 
             -- Кнопки (по 1 строке), с отдельным переключателем AUTO для каждого реактора
             local btnX, btnW = x + 1, 19
@@ -2906,7 +2912,11 @@ local function drawRodsOrderMenu(reactorNum)
 
     removeAllFields()
 
-    buffer.drawText(modalX + 3, modalY + 1, 0x000000, "Реактор #" .. reactorNum .. " — Стержни")
+    local reactorName = reactor_customName[reactorNum] or ("Реактор #" .. reactorNum)
+    buffer.drawText(modalX + 3, modalY + 1, 0x000000, reactorName .. " — Стержни")
+    -- Кнопка изменения названия
+    buffer.drawRectangle(modalX + modalW - 8, modalY + 1, 6, 1, 0x666666, 0, " ")
+    buffer.drawText(modalX + modalW - 7, modalY + 1, 0xffffff, "[✎]")
 
     local cnt = tonumber(reactor_rodCount[reactorNum]) or 0
     local exp = tonumber(reactor_rodExpected[reactorNum]) or 0
@@ -2984,7 +2994,17 @@ local function drawRodsOrderMenu(reactorNum)
                 break
             end
 
-            if y == rememberY and x >= rememberX and x <= rememberX + 3 then
+            -- Клик по кнопке изменения названия
+            if y == modalY + 1 and x >= modalX + modalW - 8 and x <= modalX + modalW - 3 then
+                local currentName = reactor_customName[reactorNum] or ""
+                local newName = tostring(showInputDialog("Введите название реактора:", currentName) or "")
+                if newName ~= "" then
+                    reactor_customName[reactorNum] = newName
+                else
+                    reactor_customName[reactorNum] = nil
+                end
+                drawRodsOrderMenu(reactorNum)
+            elseif y == rememberY and x >= rememberX and x <= rememberX + 3 then
                 remember = not remember
                 drawCheck(rememberX, rememberY, "Запомнить выбор", remember)
                 buffer.drawChanges()
@@ -3976,6 +3996,7 @@ local function mainLoop()
     reactor_rodExpected = {}
     reactor_rodMultiplier = {}
     reactor_rodLevel = {}
+    reactor_customName = {}
     
     me_proxy = nil
     me_network = false
