@@ -1917,6 +1917,9 @@ local function detectReactorRodInfo(reactorNum)
                     if v then return true end
                 elseif tv == "string" then
                     if v ~= "" then return true end
+                elseif tv == "table" or tv == "userdata" or tv == "function" then
+                    -- некоторые версии HTC могут класть структуру в виде вложенной таблицы/объекта
+                    return true
                 end
             end
             for _, v in ipairs(rod) do
@@ -1927,6 +1930,8 @@ local function detectReactorRodInfo(reactorNum)
                     if v then return true end
                 elseif tv == "string" then
                     if v ~= "" then return true end
+                elseif tv == "table" or tv == "userdata" or tv == "function" then
+                    return true
                 end
             end
             return false
@@ -1936,7 +1941,7 @@ local function detectReactorRodInfo(reactorNum)
             local t = type(entry)
             local out = {
                 occupied = false,
-                count = nil, -- 1..64
+                count = nil, -- 1..64 (точный size/count)
                 id = nil,
                 strings = nil
             }
@@ -1945,7 +1950,6 @@ local function detectReactorRodInfo(reactorNum)
                 out.count = extractRodCountLimited(entry)
                 out.id = extractRodIdentity(entry)
                 out.strings = collectStrings(entry)
-
                 if out.count and out.count > 0 then
                     out.occupied = true
                 elseif out.id then
@@ -1963,7 +1967,6 @@ local function detectReactorRodInfo(reactorNum)
                         out.occupied = true
                     end
                     if n >= 2 and n <= 64 then
-                        -- может быть уровнем/размером стака
                         addLevelCandidate(n)
                     end
                 end
@@ -1975,6 +1978,8 @@ local function detectReactorRodInfo(reactorNum)
                     if s:find(":") then
                         out.id = s
                     end
+                    local n = tonumber(s)
+                    if n then addLevelCandidate(n) end
                 end
             elseif t == "boolean" then
                 out.occupied = (entry == true)
@@ -1997,9 +2002,7 @@ local function detectReactorRodInfo(reactorNum)
             elseif rt == "number" then
                 addLevelCandidate(rod)
             elseif rt == "string" then
-                -- вытащим мелкие числа из строки (редко, но бывает "6")
-                local s = tostring(rod)
-                local n = tonumber(s)
+                local n = tonumber(rod)
                 if n then addLevelCandidate(n) end
             end
         end
