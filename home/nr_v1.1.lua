@@ -1298,6 +1298,7 @@ local function extractRodId(rod)
 
     local direct = {
         rod.name, rod.id, rod.item, rod.itemName, rod.itemId, rod.type,
+        rod.label, rod.displayName, rod.localizedName, rod.unlocalizedName,
         rod[1], rod[2], rod[3], rod[4], rod[5], rod[6], rod.stack, rod.itemStack
     }
     for _, value in ipairs(direct) do
@@ -1348,6 +1349,17 @@ local function isRodId(id)
         end
     end
     return false
+end
+
+local function getRodStackAmount(stack)
+    if type(stack) ~= "table" then
+        return 0
+    end
+    local amount = tonumber(stack.size) or tonumber(stack.count) or 1
+    if amount < 1 then
+        amount = 1
+    end
+    return amount
 end
 
 local function getInventorySize(proxy)
@@ -1434,22 +1446,22 @@ local function countRodsFromInventory(proxy)
     end
     local counts = {}
     local total = 0
-    local levelHint = 0
+    local maxLevel = 1
     for slot = 1, size do
         local stack = getStackInSlot(proxy, side, slot)
         if type(stack) == "table" then
             local id = extractRodId(stack)
             if isRodId(id) then
-                counts[id] = (counts[id] or 0) + 1
-                total = total + 1
-                local stackLevel = tonumber(stack.size) or tonumber(stack.count)
-                if stackLevel and stackLevel > levelHint then
-                    levelHint = stackLevel
+                local amount = getRodStackAmount(stack)
+                counts[id] = (counts[id] or 0) + amount
+                total = total + amount
+                if amount > maxLevel then
+                    maxLevel = amount
                 end
             end
         end
     end
-    return counts, total, size, (levelHint > 1 and levelHint or nil)
+    return counts, total, size * maxLevel, (maxLevel > 1 and maxLevel or nil)
 end
 
 local function countRodsFromInventoryAllSides(proxy)
@@ -1460,7 +1472,7 @@ local function countRodsFromInventoryAllSides(proxy)
     local total = 0
     local maxSlots = 0
     local found = false
-    local levelHint = 0
+    local maxLevel = 1
     for side = 0, 5 do
         local size = safeCall(proxy, "getInventorySize", nil, side)
         if type(size) == "number" and size > 0 then
@@ -1471,11 +1483,11 @@ local function countRodsFromInventoryAllSides(proxy)
                 if type(stack) == "table" then
                     local id = extractRodId(stack)
                     if isRodId(id) then
-                        counts[id] = (counts[id] or 0) + 1
-                        total = total + 1
-                        local stackLevel = tonumber(stack.size) or tonumber(stack.count)
-                        if stackLevel and stackLevel > levelHint then
-                            levelHint = stackLevel
+                        local amount = getRodStackAmount(stack)
+                        counts[id] = (counts[id] or 0) + amount
+                        total = total + amount
+                        if amount > maxLevel then
+                            maxLevel = amount
                         end
                     end
                 end
@@ -1488,11 +1500,11 @@ local function countRodsFromInventoryAllSides(proxy)
                     if type(stack) == "table" then
                         local id = extractRodId(stack)
                         if isRodId(id) then
-                            counts[id] = (counts[id] or 0) + 1
-                            total = total + 1
-                            local stackLevel = tonumber(stack.size) or tonumber(stack.count)
-                            if stackLevel and stackLevel > levelHint then
-                                levelHint = stackLevel
+                            local amount = getRodStackAmount(stack)
+                            counts[id] = (counts[id] or 0) + amount
+                            total = total + amount
+                            if amount > maxLevel then
+                                maxLevel = amount
                             end
                         end
                     end
@@ -1503,7 +1515,8 @@ local function countRodsFromInventoryAllSides(proxy)
     if not found then
         return nil
     end
-    return counts, total, (maxSlots > 0 and maxSlots or total), (levelHint > 1 and levelHint or nil)
+    local maxCount = (maxSlots > 0 and maxSlots or total) * maxLevel
+    return counts, total, maxCount, (maxLevel > 1 and maxLevel or nil)
 end
 
 local function formatRodCounts(counts)
@@ -1650,12 +1663,10 @@ local function updateRodData(num)
         local maxCount = 0
         local totalCount = 0
         local usedInventory = false
-        local statusTotal = 0
         local invLevel = nil
         if proxy then
             reactor_level[i] = getReactorLevel(proxy) or 1
             counts, totalCount, maxCount = countRodsFromStatus(proxy)
-            statusTotal = totalCount or 0
             local invCounts, invTotal, invMax, invLevelHint = countRodsFromInventory(proxy)
             if invCounts == nil or (invTotal or 0) == 0 then
                 local aidx = reactor_adapter_index[i]
@@ -1684,8 +1695,7 @@ local function updateRodData(num)
                     end
                     if foundCount == 1 then
                         reactor_adapter_index[i] = foundIndex
-                        invCounts, invTotal, invMax = foundCounts, foundTotal, foundMax
-                        invLevelHint = foundLevel
+                        invCounts, invTotal, invMax, invLevelHint = foundCounts, foundTotal, foundMax, foundLevel
                     end
                 end
             end
@@ -1743,12 +1753,9 @@ local function updateRodData(num)
         local multiplier = 1
         if usedInventory then
             if invLevel and invLevel > 1 then
-                multiplier = invLevel
+                multiplier = 1
             elseif lvl > 1 then
                 multiplier = lvl
-            end
-            if statusTotal and statusTotal > 0 and statusTotal > (maxCount or 0) then
-                maxCount = statusTotal
             end
         else
             if lvl > 1 then
