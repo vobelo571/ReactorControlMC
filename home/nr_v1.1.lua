@@ -1694,116 +1694,149 @@ local function parseRodMultiplierFromText(s)
     return nil
 end
 
+local function collectSmallIntsOnce(rod)
+    if type(rod) ~= "table" then return {} end
+    local out, seen = {}, {}
+
+    local function add(v)
+        local n = tonumber(v)
+        if not n then return end
+        if n % 1 ~= 0 then return end
+        if n < 2 or n > 64 then return end
+        if seen[n] then return end
+        seen[n] = true
+        table.insert(out, n)
+    end
+
+    for _, v in ipairs(rod) do
+        add(v)
+    end
+    for _, v in pairs(rod) do
+        add(v)
+    end
+    return out
+end
+
 local function detectReactorRodInfo(reactorNum)
-    local proxy = reactors_proxy[reactorNum]
-    if not proxy then
-        reactor_rodType[reactorNum] = "-"
-        reactor_rodCount[reactorNum] = 0
-        reactor_rodExpected[reactorNum] = 0
-        reactor_rodMultiplier[reactorNum] = 1
-        reactor_rodLevel[reactorNum] = 1
-        return
-    end
+    local ok = pcall(function()
+        local proxy = reactors_proxy[reactorNum]
+        if not proxy then
+            reactor_rodType[reactorNum] = "-"
+            reactor_rodCount[reactorNum] = 0
+            reactor_rodExpected[reactorNum] = 0
+            reactor_rodMultiplier[reactorNum] = 1
+            reactor_rodLevel[reactorNum] = 1
+            return
+        end
 
-    local rods = safeCallwg(proxy, "getAllFuelRodsStatus", nil)
-    if type(rods) ~= "table" then
-        reactor_rodType[reactorNum] = "-"
-        reactor_rodCount[reactorNum] = 0
-        reactor_rodExpected[reactorNum] = 0
-        reactor_rodMultiplier[reactorNum] = 1
-        reactor_rodLevel[reactorNum] = 1
-        return
-    end
+        local rods = safeCallwg(proxy, "getAllFuelRodsStatus", nil)
+        if type(rods) ~= "table" then
+            reactor_rodType[reactorNum] = "-"
+            reactor_rodCount[reactorNum] = 0
+            reactor_rodExpected[reactorNum] = 0
+            reactor_rodMultiplier[reactorNum] = 1
+            reactor_rodLevel[reactorNum] = 1
+            return
+        end
 
-    -- Важно: количество зависит от "уровня" (в каждом стержневом слоте лежит N предметов)
-    -- поэтому считаем суммой size/кол-ва в стеке.
-    local present = 0 -- предметов
-    local slotCount = #rods
-    local typeCounts = {}
-    local multCounts = {}
-    local levelCounts = {}
+        local slotCount = #rods
+        local presentSlots = 0
+        local typeCounts = {}
+        local multCounts = {}
+        local levelCounts = {}
 
-    local function addType(rawId)
-        local t = normalizeRodType(rawId) or tostring(rawId or "")
-        if t == "" then return end
-        typeCounts[t] = (typeCounts[t] or 0) + 1
-    end
+        local function addType(rawId)
+            local t = normalizeRodType(rawId) or tostring(rawId or "")
+            if t == "" then return end
+            typeCounts[t] = (typeCounts[t] or 0) + 1
+        end
 
-    local function addMult(m)
-        m = tonumber(m)
-        if not m then return end
-        multCounts[m] = (multCounts[m] or 0) + 1
-    end
+        local function addMult(m)
+            m = tonumber(m)
+            if not m then return end
+            multCounts[m] = (multCounts[m] or 0) + 1
+        end
 
-    local function addLevel(n)
-        n = tonumber(n)
-        if not n or n <= 0 then return end
-        levelCounts[n] = (levelCounts[n] or 0) + 1
-    end
+        local function addLevelCandidate(n)
+            n = tonumber(n)
+            if not n or n < 2 or n > 64 then return end
+            levelCounts[n] = (levelCounts[n] or 0) + 1
+        end
 
-    for _, rod in ipairs(rods) do
-        if type(rod) == "table" then
-            local id = extractRodIdentity(rod)
-            if id then
-                local stack = tonumber(rod.size) or tonumber(rod.count) or 1
-                if stack < 0 then stack = 0 end
-                present = present + stack
-                addLevel(stack)
-                addType(id)
+        for _, rod in ipairs(rods) do
+            if type(rod) == "table" then
+                local id = extractRodIdentity(rod)
+                if id then
+                    presentSlots = presentSlots + 1
+                    addType(id)
 
-                local strings = collectStrings(rod)
-                for _, s in ipairs(strings) do
-                    local m = parseRodMultiplierFromText(s)
-                    if m then
-                        addMult(m)
-                        break
+                    -- уровень берём по моде среди маленьких чисел в записи rod[...] (включая строковые "6")
+                    for _, n in ipairs(collectSmallIntsOnce(rod)) do
+                        addLevelCandidate(n)
+                    end
+
+                    local strings = collectStrings(rod)
+                    for _, s in ipairs(strings) do
+                        local m = parseRodMultiplierFromText(s)
+                        if m then
+                            addMult(m)
+                            break
+                        end
                     end
                 end
             end
         end
-    end
 
-    -- Уровень реактора = наиболее частый размер стека у стержней (для 1 уровня часто =1)
-    local bestLevel, bestLevelCount = 1, 0
-    for lvl, c in pairs(levelCounts) do
-        if c > bestLevelCount then
-            bestLevel, bestLevelCount = lvl, c
+        local bestLevel, bestLevelCount = 1, 0
+        for lvl, c in pairs(levelCounts) do
+            if c > bestLevelCount then
+                bestLevel, bestLevelCount = lvl, c
+            end
         end
-    end
-    if bestLevel < 1 then bestLevel = 1 end
-    reactor_rodLevel[reactorNum] = bestLevel
+        if bestLevel < 1 then bestLevel = 1 end
+        reactor_rodLevel[reactorNum] = bestLevel
 
-    local expected = slotCount * bestLevel
+        local present = presentSlots * bestLevel
+        local expected = slotCount * bestLevel
 
-    local bestType, bestTypeCount = nil, 0
-    local distinctTypes = 0
-    for t, c in pairs(typeCounts) do
-        distinctTypes = distinctTypes + 1
-        if c > bestTypeCount then
-            bestType, bestTypeCount = t, c
+        local bestType, bestTypeCount = nil, 0
+        local distinctTypes = 0
+        for t, c in pairs(typeCounts) do
+            distinctTypes = distinctTypes + 1
+            if c > bestTypeCount then
+                bestType, bestTypeCount = t, c
+            end
         end
-    end
 
-    local bestMult, bestMultCount = nil, 0
-    for m, c in pairs(multCounts) do
-        if c > bestMultCount then
-            bestMult, bestMultCount = m, c
+        local bestMult, bestMultCount = nil, 0
+        for m, c in pairs(multCounts) do
+            if c > bestMultCount then
+                bestMult, bestMultCount = m, c
+            end
         end
-    end
 
-    local rodType
-    if present == 0 then
-        rodType = "нет"
-    elseif distinctTypes > 1 then
-        rodType = "разные"
-    else
-        rodType = bestType or "-"
-    end
+        local rodType
+        if presentSlots == 0 then
+            rodType = "нет"
+        elseif distinctTypes > 1 then
+            rodType = "разные"
+        else
+            rodType = bestType or "-"
+        end
 
-    reactor_rodType[reactorNum] = rodType
-    reactor_rodCount[reactorNum] = present
-    reactor_rodExpected[reactorNum] = expected
-    reactor_rodMultiplier[reactorNum] = bestMult or 1
+        reactor_rodType[reactorNum] = rodType
+        reactor_rodCount[reactorNum] = present
+        reactor_rodExpected[reactorNum] = expected
+        reactor_rodMultiplier[reactorNum] = bestMult or 1
+    end)
+
+    if not ok then
+        reactor_rodType[reactorNum] = "-"
+        reactor_rodCount[reactorNum] = 0
+        reactor_rodExpected[reactorNum] = 0
+        reactor_rodMultiplier[reactorNum] = 1
+        reactor_rodLevel[reactorNum] = 1
+    end
 end
 
 local function updateReactorRodsState(reactorNum)
@@ -3520,7 +3553,10 @@ local function handleTouch(x, y, uuid)
                         stop(Rnum)
                         updateReactorData(Rnum)
                     else
-                        start(Rnum)
+                        local ok = pcall(start, Rnum)
+                        if not ok then
+                            message("Ошибка запуска Реактора #" .. Rnum, colors.msgwarn, 34)
+                        end
                         starting = true
                         updateReactorData(Rnum)
                     end
