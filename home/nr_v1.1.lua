@@ -4053,12 +4053,25 @@ local function safeTraceback(err)
 end
 
 local function writeCrashLog(err)
-    local f = io.open("/home/reactor_crash.log", "a")
-    if not f then
-        return
+    local ok = pcall(function()
+        if not fs.exists(dataFolder) then
+            fs.makeDirectory(dataFolder)
+        end
+        local path = dataFolder .. "reactor_crash.log"
+        local f = io.open(path, "a")
+        if not f then
+            return
+        end
+        f:write(string.format("[%s] %s\n", os.date("%Y-%m-%d %H:%M:%S"), tostring(err)))
+        f:close()
+    end)
+    if not ok then
+        local f = io.open("/home/reactor_errors.log", "a")
+        if f then
+            f:write(string.format("[%s] crash log write failed\n", os.date("%Y-%m-%d %H:%M:%S")))
+            f:close()
+        end
     end
-    f:write(string.format("[%s] %s\n", os.date("%Y-%m-%d %H:%M:%S"), tostring(err)))
-    f:close()
 end
 
 local lastCrashTime = 0
