@@ -1208,7 +1208,7 @@ local function drawTimeInfo()
     -- ---------------------------------------------------------------------------
     buffer.drawRectangle(127, fl_y1+2, 12, 2, colors.bg, 0, " ")
     
-    drawNumberWithText(134, fl_y1+2, (me_network and (60 - MeSecond) or 0), 2, colors.textclr, "Sec", colors.textclr)
+    drawNumberWithText(134, fl_y1+2, 0, 2, colors.textclr, "Sec", colors.textclr)
     
     buffer.drawRectangle(140, fl_y1+2, 18, 2, colors.bg, 0, " ")
 
@@ -3298,7 +3298,6 @@ local function mainLoop()
         message("Реакторы не найдены!", colors.msgerror)
         message("Проверьте подключение реакторов!", colors.msgerror, 34)
     end
-    checkFluid()
     if starting == true then
         start()
     end
@@ -3358,13 +3357,6 @@ local function mainLoop()
             message("Список реакторов обновлён", colors.textclr)
         end
 
-        if meChanged() then
-            os.sleep(1)
-            initMe()
-            checkFluid()
-            message("МЭ система обновленна", colors.textclr)
-        end
-
         if offFluid == true then
             for i = 1, reactors do
                 if reactor_type[i] == "Fluid" then
@@ -3382,9 +3374,6 @@ local function mainLoop()
         if now - lastTime >= 1 then
             lastTime = now
             second = second + 1
-            if me_network then
-                MeSecond = MeSecond + 1
-            end
             if work == true then
                 if second % 5 == 0 then
                     for i = 1, reactors do
@@ -3498,18 +3487,6 @@ local function mainLoop()
                     minute = 0
                 end
                 second = 0
-            end
-            if MeSecond >= 60 then
-                checkFluid()
-                if offFluid == true then
-                    for i = 1, reactors do
-                        if reactor_type[i] == "Fluid" and reactor_work[i] then
-                            stop(i)
-                            updateReactorData(i)
-                            reactor_aborted[i] = true
-                        end
-                    end
-                end
             end
             drawTimeInfo()
             drawWidgets()
