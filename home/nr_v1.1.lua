@@ -103,6 +103,7 @@ local reactor_rod_summary = {}
 local reactor_rod_count = {}
 local reactor_rod_max = {}
 local reactor_rod_types = {}
+local reactor_level = {}
 local adapters_proxy = {}
 local adapters_address = {}
 local reactor_adapter_index = {}
@@ -497,6 +498,7 @@ local function initReactors()
         reactor_rod_count[i] = 0
         reactor_rod_max[i] = 0
         reactor_rod_types[i] = "н/д"
+        reactor_level[i] = 1
     end
 end
 
@@ -1519,6 +1521,27 @@ local function formatRodTypes(counts)
     return table.concat(types, ", ")
 end
 
+local function getReactorLevel(proxy)
+    if not proxy then
+        return 1
+    end
+    local methods = {
+        "getReactorLevel",
+        "getLevel",
+        "getTier",
+        "getReactorTier",
+        "getStructureLevel",
+        "getSize",
+    }
+    for _, method in ipairs(methods) do
+        local lvl = safeCall(proxy, method, nil)
+        if type(lvl) == "number" and lvl >= 1 then
+            return math.floor(lvl)
+        end
+    end
+    return 1
+end
+
 local function updateRodData(num)
     for i = num or 1, num or reactors do
         local proxy = reactors_proxy[i]
@@ -1526,6 +1549,7 @@ local function updateRodData(num)
         local maxCount = 0
         local totalCount = 0
         if proxy then
+            reactor_level[i] = getReactorLevel(proxy) or 1
             counts, totalCount, maxCount = countRodsFromStatus(proxy)
             if counts == nil or (next(counts) == nil and (totalCount or 0) == 0) then
                 counts, totalCount, maxCount = countRodsFromInventory(proxy)
@@ -1557,6 +1581,16 @@ local function updateRodData(num)
                     counts, totalCount, maxCount = foundCounts, foundTotal, foundMax
                 end
             end
+        end
+        local lvl = reactor_level[i] or 1
+        if lvl > 1 and (totalCount or 0) > 0 then
+            if type(counts) == "table" then
+                for id, c in pairs(counts) do
+                    counts[id] = (tonumber(c) or 0) * lvl
+                end
+            end
+            totalCount = (tonumber(totalCount) or 0) * lvl
+            maxCount = (tonumber(maxCount) or 0) * lvl
         end
         reactor_rod_counts[i] = counts or {}
         reactor_rod_summary[i] = formatRodCounts(counts)
@@ -3617,6 +3651,7 @@ local function mainLoop()
     reactor_rod_count = {}
     reactor_rod_max = {}
     reactor_rod_types = {}
+    reactor_level = {}
     reactor_rod_counts = {}
     reactor_rod_summary = {}
     
