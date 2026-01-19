@@ -1,20 +1,6 @@
 -- Reactor Control v1.1 build 3
 
 -- ----------------------------------------------------------------------------------------------------
--- Ранний boot-log (нужен, чтобы ловить падения ДО mainLoop)
-local function __bootLog(msg)
-    local ok = pcall(function()
-        local f = io.open("/home/rc_boot.log", "a")
-        if f then
-            f:write(tostring(msg) .. "\n")
-            f:close()
-        end
-    end)
-    return ok
-end
-
-__bootLog("BOOT: start")
-
 local computer = require("computer")
 local image = require("image")
 local buffer = require("doubleBuffering")
@@ -27,26 +13,8 @@ local unicode = require("unicode")
 local bit = require("bit32")
 -- ----------------------------------------------------------------------------------------------------
 
-__bootLog("BOOT: requires ok")
-
--- Безопасная установка разрешения: если железо не тянет 160x50, не падаем в shell.
-local function safeSetResolution(w, h)
-    local gpu = component and component.gpu
-    if gpu and gpu.maxResolution then
-        local maxW, maxH = gpu.maxResolution()
-        if type(maxW) == "number" and type(maxH) == "number" then
-            w = math.min(w, maxW)
-            h = math.min(h, maxH)
-        end
-        pcall(gpu.setResolution, w, h)
-    end
-    pcall(buffer.setResolution, w, h)
-    pcall(buffer.clear, 0x000000)
-    return w, h
-end
-
-safeSetResolution(160, 50)
-__bootLog("BOOT: resolution set")
+buffer.setResolution(160, 50)
+buffer.clear(0x000000)
 
 local lastTime = computer.uptime()
 local exit = false
@@ -2880,8 +2848,6 @@ local function drawRodsOrderMenu(reactorNum)
     local key = getReactorKey(reactorNum)
     local preset = (rodPresetByAddr and rodPresetByAddr[key]) or {}
 
-    local remember = (preset.id ~= nil and tostring(preset.id) ~= "")
-
     local function parseMultFromId(id)
         id = tostring(id or ""):lower()
         if id:find("sixteen") then return 16 end
@@ -2889,30 +2855,51 @@ local function drawRodsOrderMenu(reactorNum)
         return nil
     end
 
-    local function normalizeTypeFromId(id)
-        local t = normalizeRodType(id)
-        if t then return t end
+    local function normalizeSelectedType(t)
+        t = tostring(t or "")
+        if t == "Уран" or t == "MOX" or t == "Калифорний" or t == "Ксирдалий-Визамиумное" then
+            return t
+        end
         return nil
     end
 
-    local selectedMult = tonumber(reactor_rodMultiplier[reactorNum]) or 16
-    if selectedMult ~= 4 and selectedMult ~= 16 then selectedMult = 16 end
+    local remember = (preset.id ~= nil and tostring(preset.id) ~= "")
+
+    -- Инициализация выбранных параметров:
+    -- 1) из сохранённого пресета, 2) из распознанного в реакторе, 3) дефолт
+    local selectedMult = 16
+    local selectedType = "Уран"
 
     local presetId = tostring(preset.id or ""):match("^%s*(.-)%s*$")
+    local hasPreset = (presetId ~= "")
     if presetId ~= "" then
         selectedMult = parseMultFromId(presetId) or selectedMult
+        selectedType = normalizeSelectedType(normalizeRodType(presetId)) or selectedType
+    end
+    -- Важно: если есть сохранённый пресет, НЕ переопределяем выбор значениями из реактора.
+    if not hasPreset then
+        selectedMult = tonumber(reactor_rodMultiplier[reactorNum]) or selectedMult
+        if selectedMult ~= 4 and selectedMult ~= 16 then selectedMult = 16 end
+
+        selectedType = normalizeSelectedType(reactor_rodType[reactorNum]) or selectedType
+    else
+        if selectedMult ~= 4 and selectedMult ~= 16 then selectedMult = 16 end
+        selectedType = normalizeSelectedType(selectedType) or "Уран"
     end
 
-    local selectedType = tostring(reactor_rodType[reactorNum] or "")
-    if selectedType ~= "Уран" and selectedType ~= "MOX" and selectedType ~= "Калифорний" and selectedType ~= "Ксирдалий-Визамиумное" then
-        selectedType = normalizeTypeFromId(presetId) or "Уран"
-    end
-
-    local function inferId()
+    local function currentSelectedId()
         return getRodIdByTypeAndMult(selectedType, selectedMult)
     end
 
-    local modalX, modalY, modalW, modalH = 40, 10, 70, 13
+    -- если для выбранного комбо нет ID — попробуем любую кратность для типа
+    if not currentSelectedId() then
+        local fallback = getRodIdByTypeAndMult(selectedType, 16) or getRodIdByTypeAndMult(selectedType, 4)
+        if fallback then
+            selectedMult = parseMultFromId(fallback) or selectedMult
+        end
+    end
+
+    local modalX, modalY, modalW, modalH = 38, 10, 64, 14
     local old = buffer.copy(1, 1, 160, 50)
     buffer.drawRectangle(1, 1, 160, 50, 0x000000, 0, " ", 0.4)
     buffer.drawRectangle(modalX, modalY, modalW, modalH, 0xcccccc, 0, " ")
@@ -2929,6 +2916,11 @@ local function drawRodsOrderMenu(reactorNum)
 
     buffer.drawText(modalX + 3, modalY + 1, 0x000000, "Реактор #" .. reactorNum .. " — Стержни")
 
+    local cnt = tonumber(reactor_rodCount[reactorNum]) or 0
+    local exp = tonumber(reactor_rodExpected[reactorNum]) or 0
+    local lvl = tonumber(reactor_rodLevel[reactorNum]) or 1
+    buffer.drawText(modalX + 3, modalY + 2, 0x000000, "Текущее: " .. tostring(cnt) .. "/" .. tostring(exp) .. "   Уровень: " .. tostring(lvl))
+
     local function drawCheck(x, y, label, state)
         local bg = state and 0x2beb1a or 0x444444
         buffer.drawRectangle(x, y, 4, 1, bg, 0, " ")
@@ -2936,27 +2928,31 @@ local function drawRodsOrderMenu(reactorNum)
         buffer.drawText(x + 5, y, 0x000000, label)
     end
 
-    local rememberX, rememberY = modalX + 3, modalY + 3
+    local rememberX, rememberY = modalX + 3, modalY + 4
     drawCheck(rememberX, rememberY, "Запомнить выбор", remember)
 
-    local multY = modalY + 5
+    -- Кратность
+    local multLabelY = modalY + 6
+    local multBtnY = modalY + 7
     local multX4, multX16 = modalX + 3, modalX + 15
     local function drawMultButtons()
-        buffer.drawText(modalX + 3, multY, 0x000000, "Кратность:")
+        buffer.drawText(modalX + 3, multLabelY, 0x000000, "Кратность:")
         local function btn(x, label, mult)
             local on = (selectedMult == mult)
             local bg = on and 0x2f8cff or 0x666666
-            buffer.drawRectangle(x, multY + 1, 10, 1, bg, 0, " ")
-            buffer.drawText(x, multY + 1, 0xffffff, shortenNameCentered(label, 10))
+            buffer.drawRectangle(x, multBtnY, 10, 1, bg, 0, " ")
+            buffer.drawText(x, multBtnY, 0xffffff, shortenNameCentered(label, 10))
         end
         btn(multX4, "x4", 4)
         btn(multX16, "x16", 16)
     end
 
-    local typesY = modalY + 8
+    -- Тип
+    local typesLabelY = modalY + 9
+    local typesY = modalY + 10
     local t1x, t2x, t3x, t4x = modalX + 3, modalX + 18, modalX + 33, modalX + 48
     local function drawTypeButtons()
-        buffer.drawText(modalX + 3, typesY - 1, 0x000000, "Тип:")
+        buffer.drawText(modalX + 3, typesLabelY, 0x000000, "Тип:")
         local function btn(x, txt, rodType)
             local on = (selectedType == rodType)
             local id = getRodIdByTypeAndMult(rodType, selectedMult)
@@ -2970,11 +2966,17 @@ local function drawRodsOrderMenu(reactorNum)
         btn(t4x, "Ксирд.", "Ксирдалий-Визамиумное")
     end
 
-    local hintY = modalY + modalH - 2
-    buffer.drawText(modalX + 3, hintY, 0x666666, "Клик по типу — сразу заказать. Вне окна — закрыть.")
-
     drawMultButtons()
     drawTypeButtons()
+
+    local btnY = modalY + modalH - 2
+    local btnOrderX, btnCloseX = modalX + 3, modalX + 23
+    buffer.drawRectangle(btnOrderX, btnY, 18, 1, 0x2f8cff, 0, " ")
+    buffer.drawText(btnOrderX, btnY, 0xffffff, shortenNameCentered("Заказать", 18))
+    buffer.drawRectangle(btnCloseX, btnY, 18, 1, 0x444444, 0, " ")
+    buffer.drawText(btnCloseX, btnY, 0xffffff, shortenNameCentered("Закрыть", 18))
+
+    buffer.drawText(modalX + 3, modalY + modalH - 1, 0x666666, "Клик вне окна — закрыть")
     buffer.drawChanges()
 
     while true do
@@ -2994,7 +2996,37 @@ local function drawRodsOrderMenu(reactorNum)
                 remember = not remember
                 drawCheck(rememberX, rememberY, "Запомнить выбор", remember)
                 buffer.drawChanges()
-            elseif y == multY + 1 then
+            elseif y == btnY then
+                if x >= btnOrderX and x < btnOrderX + 18 then
+                    local id = currentSelectedId()
+                    if not id then
+                        message("Для выбранного типа/кратности нет ID стержня в списке.", colors.msgwarn, 34)
+                    else
+                        local desired = tonumber(reactor_rodExpected[reactorNum]) or 0
+                        -- Управление пресетом:
+                        -- если remember=true, сохраняем выбранный ID (а qty = desired)
+                        -- если remember=false, удаляем ранее сохранённый пресет
+                        if remember then
+                            orderRodsPresetForReactor(reactorNum, id, desired, true, nil)
+                        else
+                            local k = getReactorKey(reactorNum)
+                            if rodPresetByAddr and rodPresetByAddr[k] ~= nil then
+                                rodPresetByAddr[k] = nil
+                                saveCfg()
+                            end
+                            orderRodsPresetForReactor(reactorNum, id, desired, false, nil)
+                        end
+                    end
+                    buffer.paste(1, 1, old)
+                    buffer.drawChanges()
+                    drawWidgets()
+                    break
+                elseif x >= btnCloseX and x < btnCloseX + 18 then
+                    buffer.paste(1, 1, old)
+                    buffer.drawChanges()
+                    break
+                end
+            elseif y == multBtnY then
                 if x >= multX4 and x < multX4 + 10 then
                     selectedMult = 4
                     drawMultButtons()
@@ -3009,19 +3041,8 @@ local function drawRodsOrderMenu(reactorNum)
             elseif y == typesY then
                 local function clickType(rodType)
                     selectedType = rodType
-                    local id = inferId()
-                    if not id then
-                        message("Для этого типа/кратности нет ID стержня в списке.", colors.msgwarn, 34)
-                        drawTypeButtons()
-                        buffer.drawChanges()
-                        return
-                    end
-                    local desired = tonumber(reactor_rodExpected[reactorNum]) or 0
-                    orderRodsPresetForReactor(reactorNum, id, desired, remember, nil)
-                    buffer.paste(1, 1, old)
+                    drawTypeButtons()
                     buffer.drawChanges()
-                    drawWidgets()
-                    break
                 end
                 if x >= t1x and x < t1x + 14 then clickType("Уран")
                 elseif x >= t2x and x < t2x + 14 then clickType("MOX")
@@ -4024,16 +4045,9 @@ local function mainLoop()
     end
 
     if isChatBox then
-        chatThread = require("thread").create(function()
-            local okChat, errChat = xpcall(chatMessageHandler, debug.traceback)
-            if not okChat then
-                logError("ChatThread Error:")
-                logError(errChat)
-                message("ChatThread Error: " .. shortenNameCentered(tostring(errChat), 34), colors.msgwarn, 34)
-            end
-        end)
+        chatThread = require("thread").create(chatMessageHandler)
         message("Чат-бокс подключен! Список команд: @help", colors.msginfo)
-        pcall(chatBox.say, "§2Чат-бокс подключен! §aСписок команд: @help")
+        chatBox.say("§2Чат-бокс подключен! §aСписок команд: @help")
     end
 
     if work == true then
