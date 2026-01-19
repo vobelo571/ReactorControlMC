@@ -1900,7 +1900,9 @@ local function detectReactorRodInfo(reactorNum, debugDump)
             local maxN = maxNumberInRod(rod)
             local big = rodHasLargeNumber(rod) and "1" or "0"
 
-            dbg(prefix .. " id=" .. shortenRight(tostring(id or "-"), 34 - (unicode.len(prefix) + 4)))
+            local avail = 34 - (unicode.len(prefix) + 4)
+            if avail < 8 then avail = 8 end
+            dbg(prefix .. " id=" .. shortenRight(tostring(id or "-"), avail))
             dbg(prefix .. " count=" .. tostring(c or "-") .. " big=" .. big)
             dbg(prefix .. " maxN=" .. tostring(maxN or "-"))
         end
