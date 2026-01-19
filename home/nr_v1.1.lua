@@ -39,7 +39,6 @@ if not fs.exists(configPath) then
     if file then
         file:write("-- Конфигурация программы Reactor Control v" .. version .."\n")
         file:write("-- Прежде чем что-то изменять, пожалуйста внимательно читайте описание!\n\n")
-        file:write("porog = 50000 -- Минимальное значение порога жидкости в mB\n\n")
         file:write("-- Впишите никнеймы игроков которым будет разрешеннен доступ к ПК, обязательно ради вашей безопасности!\n")
         file:write("users = {} -- Пример: {\"Flixmo\", \"Nickname1\"} -- Именно что с кавычками и запятыми!\n")
         file:write("usersold = {} -- Не трогайте, может заблокировать ПК!\n\n")
@@ -76,7 +75,6 @@ local minute = 0
 local hour = 0
 local testvalue = 0
 local rf = 0
-local fluidInMe = 0
 local ismechecked = false
 local flux_network = false
 local flux_checked = false
@@ -84,7 +82,6 @@ local flux_checked = false
 local consoleLines = {}
 local work = false
 local starting = false
-local offFluid = false
 
 local reactor_work       = {}
 local reactor_aborted    = {}
@@ -93,14 +90,11 @@ local reactor_type       = {}
 local reactor_address    = {}
 local reactors_proxy     = {}
 local reactor_rf         = {}
-local reactor_getcoolant = {}
-local reactor_maxcoolant = {}
 local reactor_depletionTime = {}
 local reactor_ConsumptionPerSecond = {}
 local last_me_address = nil
 local me_network = false
 local me_proxy = nil
-local lastValidFluid = 0
 local maxThreshold = 10^12
 local reason = nil
 local depletionTime = 0
@@ -113,7 +107,6 @@ local chatThread = nil
 local chatCommands = {
     ["@help"] = true,
     ["@status"] = true,
-    ["@setporog"] = true,
     ["@start"] = true,
     ["@stop"] = true,
     ["@restart"] = true,
@@ -153,10 +146,7 @@ local config = {
     clickArea15 = {x1=widgetCoords[9][1]+5, y1=widgetCoords[9][2]+9, x2=widgetCoords[9][1]+11, y2=widgetCoords[9][2]+10}, -- Реактор 9
     clickArea16 = {x1=widgetCoords[10][1]+5, y1=widgetCoords[10][2]+9, x2=widgetCoords[10][1]+11, y2=widgetCoords[10][2]+10}, -- Реактор 10
     clickArea17 = {x1=widgetCoords[11][1]+5, y1=widgetCoords[11][2]+9, x2=widgetCoords[11][1]+11, y2=widgetCoords[11][2]+10}, -- Реактор 11
-    clickArea18 = {x1=widgetCoords[12][1]+5, y1=widgetCoords[12][2]+9, x2=widgetCoords[12][1]+11, y2=widgetCoords[12][2]+10}, -- Реактор 12
-    -- Координаты для кнопок в правом меню
-    clickAreaPorogPlus = {x1=124, y1=36, x2=125, y2=33}, -- Кнопка "+ Порог"
-    clickAreaPorogMinus = {x1=126, y1=36, x2=127, y2=33} -- Кнопка "- Порог"
+    clickArea18 = {x1=widgetCoords[12][1]+5, y1=widgetCoords[12][2]+9, x2=widgetCoords[12][1]+11, y2=widgetCoords[12][2]+10} -- Реактор 12
 }
 local colors = {
     bg = 0x202020,
@@ -267,13 +257,6 @@ local brail_console = {
     {0,0,1,1,0,0,0,0}
 }
 
-local brail_fluid = {
-    {0,1,0,1,1,1,1,1},
-    {1,0,1,0,1,1,1,1},
-    {1,1,0,1,0,0,0,0},
-    {1,1,1,0,0,0,0,0}
-}
-
 local brail_greenbtn = {
     {0,0,0,1,1,1,0,1},
     {0,0,0,0,1,0,0,0},
@@ -366,7 +349,6 @@ local function saveCfg(param)
 
     file:write("-- Конфигурация программы Reactor Control v" .. version .."\n")
     file:write("-- Прежде чем что-то изменять, пожалуйста внимательно читайте описание!\n\n")
-    file:write(string.format("porog = %d -- Минимальное значение порога жидкости в mB\n\n", math.max(0, porog)))
     
     -- users
     file:write("-- Впишите никнеймы игроков которым будет разрешеннен доступ к ПК, обязательно ради вашей безопасности!\n")
@@ -450,8 +432,6 @@ local function initReactors()
     end
     for i = 1, reactors do
         reactor_rf[i] = 0
-        reactor_getcoolant[i] = 0
-        reactor_maxcoolant[i] = 0
         temperature[i] = 0
         reactor_aborted[i] = false
         reactor_depletionTime[i] = 0
@@ -474,8 +454,7 @@ local function initMe()
             current_me_address = nil
         end
     else
-        offFluid = true
-        reason = "МЭ не найдена!"
+        -- МЭ не найдена
     end
     return current_me_address
 end
@@ -647,7 +626,6 @@ local function getDepletionTime(num)
 
     for i = 1, reactors do
         local rods = safeCallwg(reactors_proxy[i], "getAllFuelRodsStatus", nil)
-        local isFluid = reactor_type[i] == "Fluid"
         local reactorTime = 0
 
         if type(rods) == "table" and #rods > 0 then
@@ -656,9 +634,6 @@ local function getDepletionTime(num)
                 if type(rod) == "table" and rod[6] then
                     -- Добавлена проверка на число
                     local fuelLeft = tonumber(rod[6]) or 0
-                    if isFluid then
-                        fuelLeft = fuelLeft / 2
-                    end
                     if fuelLeft > maxRod then
                         maxRod = fuelLeft
                     end
@@ -792,11 +767,7 @@ local function drawWidgets()
             buffer.drawText(x + 4,  y + 4,  colors.textclr, "Тип: " .. (reactor_type[i] or "-"))
             buffer.drawText(x + 4,  y + 5,  colors.textclr, "Запущен: " .. (reactor_work[i] and "Да" or "Нет"))
             buffer.drawText(x + 4,  y + 6,  colors.textclr, "Распад: " .. secondsToHMS(reactor_depletionTime[i] or 0))
-            buffer.drawText(x + 4,  y + 7,  colors.textclr, "Потреб: " .. (reactor_type[i] == "Fluid" and reactor_ConsumptionPerSecond[i] or "0") .. " mB/s")
             animatedButton(1, x + 6, y + 8, (reactor_work[i] and "Отключить" or "Включить"), nil, nil, 10, nil, nil, (reactor_work[i] and 0xfd3232 or 0x2beb1a))
-            if reactor_type[i] == "Fluid" then
-                drawVerticalProgressBar(x + 1, y + 1, 9, reactor_getcoolant[i], reactor_maxcoolant[i], 0x0044FF, 0x00C8FF, colors.bg2)
-            end
         else
             local x, y = widgetCoords[i][1], widgetCoords[i][2]
             buffer.drawRectangle(x + 1, y, 20, 11, colors.msgwarn, 0, " ")
@@ -814,9 +785,6 @@ local function drawWidgets()
             buffer.drawText(x + 4,  y + 6,  colors.msgerror, "Аварийно отключен!")
             buffer.drawText(x + 4,  y + 7,  colors.msgerror, "Причина:")
             buffer.drawText(x + 4,  y + 8,  colors.msgerror, (reason or "Неизвестная ошибка!"))
-            if reactor_type[i] == "Fluid" then
-                drawVerticalProgressBar(x + 1, y + 1, 9, reactor_getcoolant[i], reactor_maxcoolant[i], 0x0044FF, 0x00C8FF, colors.bg2)
-            end
         end
     end
 end
@@ -1267,23 +1235,6 @@ local function drawStatic()
     buffer.drawChanges()
 end
 
-local function getTotalFluidConsumption()
-    local total = 0
-    local consumeSecond = 0
-    
-    for i = 1, #reactors_proxy do
-        local reactor = reactors_proxy[i]
-        if reactor_type[i] == "Fluid" then
-            if reactor_work[i] then
-                consumeSecond = safeCall(reactor, "getFluidCoolantConsume", 0) or 0
-                reactor_ConsumptionPerSecond[i] = consumeSecond
-                total = total + consumeSecond
-            end
-        end
-    end
-    
-    return total
-end
 
 local function drawStatus(num)
     checkReactorStatus()
@@ -1314,8 +1265,6 @@ local function drawStatus(num)
 
     -- Сдвиг x с 88 на 90
     buffer.drawText(90, 46, colors.textclr, "Кол-во реакторов: " .. reactors)
-    buffer.drawText(90, 47, colors.textclr, "Общее потребление")
-    buffer.drawText(90, 48, colors.textclr, "жидкости: " .. consumeSecond .. " Mb/s")
 
     if any_reactor_on == true then
         -- Сдвиг координат индикатора (110->112, 111->113, 115->117)
@@ -1340,24 +1289,6 @@ local function drawStatus(num)
     buffer.drawChanges()
 end
 
-local function drawPorog()
-    local fl_y1 = 35
-    if flux_network == true then fl_y1 = 32 end
-    buffer.drawRectangle(123, fl_y1-1, 35, 4, colors.bg, 0, " ")
-    for i = 0, 35 - 1 do
-        buffer.drawText(123 + i, fl_y1-2, colors.bg, brailleChar(brail_console[1]))
-    end
-    for i = 0, 35 - 1 do
-        buffer.drawText(123 + i, fl_y1, colors.bg2, brailleChar(brail_console[2]))
-    end
-    buffer.drawText(124, fl_y1-1, colors.textclr, "Настройка порога жидкости:")
-    
-    drawDigit(124, fl_y1+1, brail_greenbtn, 0xa6ff00)
-    drawDigit(126, fl_y1+1, brail_redbtn, 0xff2121) 
-  
-    drawNumberWithText(144, fl_y1+1, porog, 2, colors.textclr, "Mb", colors.textclr)
-    buffer.drawChanges()
-end
 
 local function round(num, digits)
     local mult = 10 ^ (digits or 0)
@@ -1420,47 +1351,7 @@ local function formatFluxRF(value)
     return str, suffixes[i]
 end
 
-local function formatFluid(value)
-    if type(value) ~= "number" then value = 0 end
-    if metric == 0 then
-        -- Auto
-        if value >= 1e9 then
-            return round(value / 1e9, 1), "gMb"
-        elseif value >= 1e6 then
-            return round(value / 1e6, 1), "mMb"
-        elseif value >= 1e3 then
-            return round(value / 1e3, 1), "kMb"
-        else
-            return round(value, 1), "Mb"
-        end
-    elseif metric == 1 then
-        return round(value, 1), "Mb"
-    elseif metric == 2 then
-        return round(value / 1e3, 1), "kMb"
-    elseif metric == 3 then
-        return round(value / 1e6, 1), "mMb"
-    elseif metric == 4 then
-        return round(value / 1e9, 1), "gMb"
-    end
-end
 
-local function drawFluidinfo()
-    local fl_y1 = 30
-    if flux_network == true then fl_y1 = 27 end
-    buffer.drawRectangle(123, fl_y1-1, 35, 4, colors.bg, 0, " ")
-    for i = 0, 35 - 1 do
-        buffer.drawText(123 + i, fl_y1-2, colors.bg, brailleChar(brail_console[1]))
-    end
-    for i = 0, 35 - 1 do
-        buffer.drawText(123 + i, fl_y1, colors.bg2, brailleChar(brail_console[2]))
-    end
-    buffer.drawText(124, fl_y1-1, colors.textclr, "Жидкости в МЭ сети:")
-    
-    drawDigit(125, fl_y1+1, brail_fluid, 0x0088ff)
-
-    local val, unit = formatFluid(fluidInMe or 0)
-    drawNumberWithText(143, fl_y1+1, (me_network and (val or 0) or 0), 2, colors.textclr, unit, colors.textclr)
-end
 
 local function drawFluxRFinfo()
     initFlux()
@@ -1530,11 +1421,6 @@ local function drawDynamic()
     end
     buffer.drawText(124, 3, colors.textclr, "Информационное окно отладки:")
     drawStatus()
-    -- -----------------------------------------------------------
-    drawFluidinfo()
-
-    -- -----------------------------------------------------------
-    drawPorog()
 
     -- -----------------------------------------------------------
     drawFluxRFinfo()
@@ -1556,14 +1442,9 @@ local function updateReactorData(num)
     for i = num or 1, num or reactors do
         local proxy = reactors_proxy[i]
         temperature[i]      = safeCall(proxy, "getTemperature", 0)
-        reactor_type[i]     = safeCall(proxy, "isActiveCooling", false) and "Fluid" or "Air"
+        reactor_type[i]     = "Air"
         reactor_rf[i]       = safeCall(proxy, "getEnergyGeneration", 0)
         reactor_work[i]     = safeCall(proxy, "hasWork", false)
-
-        if reactor_type[i] == "Fluid" then
-            reactor_getcoolant[i] = safeCall(proxy, "getFluidCoolant", 0) or 0
-            reactor_maxcoolant[i] = safeCall(proxy, "getMaxFluidCoolant", 0) or 1
-        end
     end
     drawWidgets()
     drawRFinfo()
@@ -1576,61 +1457,15 @@ local function start(num)
         message("Запуск реакторов...", colors.textclr, 34)
     end
     for i = num or 1, num or reactors do
-        local rType = reactor_type[i]
         local proxy = reactors_proxy[i]
-
-
-        if rType == "Fluid" then
-            if offFluid == false then
-                safeCall(proxy, "activate")
-                reactor_work[i] = true
-                if num then
-                    message("Реактор #" .. i .. " (жидкостный) запущен!", colors.msginfo, 34)
-                end
-            else
-                if fluidInMe <= porog then
-                    if num then
-                        message("Ошибка по жидкости! Реактор #" .. i .. " (жидкостный) не был запущен!", colors.msgwarn, 34)
-                    end
-                    offFluid = true
-                    if reason == nil then
-                        reason = "Ошибка жидкости!"
-                        reactor_aborted[i] = true
-                    end
-                else
-                    offFluid = false
-                    safeCall(proxy, "activate")
-                    reactor_work[i] = true
-                    if num then
-                        message("Реактор #" .. i .. " (жидкостный) запущен!", colors.msginfo, 34)
-                    end
-                end
-            end
-        else
-            safeCall(proxy, "activate")
-            reactor_work[i] = true
-            if num then
-                message("Реактор #" .. i .. " (воздушный) запущен!", colors.msginfo, 34)
-            end
+        safeCall(proxy, "activate")
+        reactor_work[i] = true
+        if num then
+            message("Реактор #" .. i .. " запущен!", colors.msginfo, 34)
         end
     end
     if not num then
-        if offFluid == true then
-            local isAir = false
-            for i = 1, reactors do
-                local rType = reactor_type[i]
-                if rType == "Air" then
-                    isAir = true
-                    break
-                end
-            end
-            if isAir == true then
-                message("Воздушные реакторы запущены!", colors.msginfo, 34)
-            end
-            message("Ошибка по жидкости! Жидкостные реакторы не будут запущены!", colors.msgwarn, 34)
-        else
-            message("Реакторы запущены!", colors.msginfo, 34)
-        end
+        message("Реакторы запущены!", colors.msginfo, 34)
     end
     drawWidgets()
 end
@@ -1644,18 +1479,11 @@ local function stop(num)
     end
     for i = num or 1, num or reactors do
         local proxy = reactors_proxy[i]
-        local rType = reactor_type[i]
         safeCall(proxy, "deactivate")
         reactor_work[i] = false
         drawStatus()
-        if rType == "Fluid" then
-            if num then
-                message("Реактор #" .. i .. " (жидкостный) отключен!", colors.msginfo, 34)
-            end
-        else
-            if num then
-                message("Реактор #" .. i .. " (воздушный) отключен!", colors.msginfo, 34)
-            end
+        if num then
+            message("Реактор #" .. i .. " отключен!", colors.msginfo, 34)
         end
 
         if any_reactor_on == false then
@@ -1689,101 +1517,6 @@ local function updateMeProxy()
     end
 end
 
-local function checkFluid()
-    MeSecond = 0
-    if not me_network then
-        offFluid = true
-        reason = "МЭ не найдена!"
-        fluidInMe = 0
-        drawFluidinfo()
-        return
-    end
-
-    if not me_proxy then
-        updateMeProxy()
-        if not me_proxy then
-            offFluid = true
-            reason = "Нет прокси МЭ!"
-            fluidInMe = 0
-            drawFluidinfo()
-            return
-        end
-    end
-
-    local ok, items = pcall(me_proxy.getItemsInNetwork, { name = "ae2fc:fluid_drop" })
-    if not ok or type(items) ~= "table" then
-        offFluid = true
-        reason = "Ошибка жидкости!"
-        fluidInMe = 0
-        drawFluidinfo()
-        return
-    end
-
-    local targetFluid = "low_temperature_refrigerant"
-    local count = 0
-
-    for _, item in ipairs(items) do
-        if item.label and item.label:find(targetFluid) then
-            count = count + (item.size or 0)
-        end
-    end
-
-    if count == 0 then
-        offFluid = true
-        reason = "Нет хладагента!"
-    end
-
-    if count > maxThreshold then
-        count = lastValidFluid
-    else
-        lastValidFluid = count
-    end
-
-    fluidInMe = count
-    drawFluidinfo()
-
-    if fluidInMe <= porog then
-        if ismechecked == false then
-            message("Жидкости в МЭ меньше порога!", colors.msgwarn, 34)
-            for i = 1, reactors do
-                if reactor_type[i] == "Fluid" then
-                    drawStatus(i)
-                    if reactor_work[i] == true then
-                        message("Отключаю жидкостные реакторы...", colors.textclr, 34)
-                        break
-                    end
-                end
-            end
-        end
-        offFluid = true
-        reason = "Нет хладагента!"
-        ismechecked = true
-    else
-        if offFluid == true and starting == true then
-            message("Жидкости хватает, включаю реакторы...", colors.textclr, 34)
-            offFluid = false
-            ismechecked = false
-            for i = 1, reactors do
-                if reactor_type[i] == "Fluid" then
-                    start(i)
-                    reactor_aborted[i] = false
-                    updateReactorData(i)
-                end
-            end
-        end
-        if offFluid == true then 
-            offFluid = false 
-            for i = 1, reactors do
-                if reactor_type[i] == "Fluid" then
-                    if reactor_aborted[i] == true then
-                        reactor_aborted[i] = false
-                        updateReactorData(i)
-                    end
-                end
-            end
-        end
-    end
-end
 
 function onInterrupt()
     message("Обнаружено прерывание!", colors.msgerror)
@@ -1865,20 +1598,8 @@ local function logError(err)
             f:write("starting=" .. tostring(starting) ..
                     ", reactors=" .. tostring(reactors) ..
                     ", me_network=" .. tostring(me_network) ..
-                    ", fluidInMe=" .. tostring(fluidInMe) ..
                     ", work=" .. tostring(work) ..
                     ", any_reactor_on=" .. tostring(any_reactor_on) .. "\n")
-
-            if reactors > 0 then
-                local coolant_line = "coolant_levels="
-                for i = 1, reactors do
-                    coolant_line = coolant_line .. tostring(reactor_getcoolant[i] or "nil")
-                    if i < reactors then
-                        coolant_line = coolant_line .. ", "
-                    end
-                end
-                f:write(coolant_line .. "\n")
-            end
 
             f:write("\n")
             f:close()
@@ -2038,12 +1759,6 @@ local function drawSettingsMenu()
     -- Заголовки
     buffer.drawText(modalX + 11, modalY + 1, 0x000000, "Меню настроек приложения ReactorControl v" .. version .. "." .. build)
 
-    buffer.drawText(modalX + 7, modalY + 3, 0x000000, "Порог жидкости")
-    createSearchField(modalX + 3, modalY + 5, 22, "Введите порог(Mb)")
-    searchFields[1].text = tostring(porog)
-    local offset = unicode.len(searchFields[1].text) + 1
-    searchFields[1].cursorPos = offset
-
     buffer.drawText(modalX + 5, modalY + 7, 0x000000, "Тема по умолчанию")
     animatedButton(1, modalX + 4, modalY + 8, "Светлая      ", nil, nil, 20, nil, nil, 0x444444, 0xffffff)
     local sw1_x, sw1_y, sw1_w = modalX+16, modalY+9, 7
@@ -2137,7 +1852,6 @@ local function drawSettingsMenu()
 
     local themetoggle = theme
 
-    local NSporog = porog
     local NSTheme = theme
     local NSDebugLog = debugLog
     local NSusers = {}
@@ -2204,7 +1918,6 @@ local function drawSettingsMenu()
                     start()
                 end
                 theme = NSTheme
-                porog = NSporog
                 debugLog = NSDebugLog
                 users = NSusers
                 saveCfg()
@@ -2297,7 +2010,6 @@ local function drawSettingsMenu()
                 animatedButton(1, modalX + 5, modalY + modalH - 4, "Сохранить и выйти", nil, nil, 18, nil, nil, 0x8100cc, 0xffffff)
                 buffer.drawChanges()
                 -- Сохраняем настройки
-                porog = tonumber(searchFields[1].text) or porog
                 theme = sw1_state
                 debugLog = sw3_state
                 saveCfg()
@@ -2333,15 +2045,6 @@ local function drawSettingsMenu()
                             f.cursorPos = f.cursorPos + 1
                         end
                     elseif char >= 32 and char <= 126 then -- Печатаемые символы
-                        if i == 1 then -- Поле порога жидкости - только цифры
-                            local c = string.char(char)
-                            if c:match("%d") then
-                                f.text = f.text:sub(1, f.cursorPos - 1)
-                                    .. c
-                                    .. f.text:sub(f.cursorPos)
-                                f.cursorPos = f.cursorPos + 1
-                            end
-                        else -- всё остальное - любые символы
                             local c = string.char(char) 
                             f.text = f.text:sub(1, f.cursorPos - 1) .. c .. f.text:sub(f.cursorPos) 
                             f.cursorPos = f.cursorPos + 1 
@@ -2452,11 +2155,11 @@ local function drawInfoMenu()
         "Описание программы:",
         "Reactor Control — программа мониторинга, контроля и управления критически важными системами реакторного комплекса для игроков сервера McSkill HiTech 1.12.2, разработанная на базе мода OpenComputers. Программа предназначена для централизованного управления реакторами и связанными с ними инфраструктурными системами, а также для автоматического предотвращения аварийных ситуаций без необходимости постоянного ручного контроля.",
         "",
-        "Программа поддерживает работу с жидкостными и воздушными HT-реакторами, интеграцию с Applied Energistics 2 для мониторинга и анализа жидкостей, а также интеграцию с Flux Networks для контроля энергетической сети. Подключение осуществляется через адаптеры OpenComputers к соответствующим контроллерам. Основной упор сделан на стабильность, безопасность и корректную работу реакторных комплексов любого масштаба.",
+        "Программа поддерживает работу с воздушными HT-реакторами, интеграцию с Applied Energistics 2 для мониторинга и анализа, а также интеграцию с Flux Networks для контроля энергетической сети. Подключение осуществляется через адаптеры OpenComputers к соответствующим контроллерам. Основной упор сделан на стабильность, безопасность и корректную работу реакторных комплексов любого масштаба.",
         "",
-        "Реализована автоматическая система безопасности для жидкостных реакторов. При снижении уровня хладагента в МЭ-сети ниже заданного порога либо при полной недоступности МЭ-сети реакторы автоматически отключаются и переводятся в аварийный режим, в котором ручной запуск блокируется. После восстановления нормальных условий реакторы автоматически возвращаются в штатный режим и запускаются. Воздушные реакторы при проблемах с жидкостью не затрагиваются. Контроль состояния сетей и жидкостей выполняется на постоянной основе.",
+        "Реализована автоматическая система безопасности для реакторов. Реакторы автоматически отключаются при критических проблемах и переводятся в аварийный режим, в котором ручной запуск блокируется. После восстановления нормальных условий реакторы автоматически возвращаются в штатный режим и запускаются. Контроль состояния сетей выполняется на постоянной основе.",
         "",
-        "Графический интерфейс программы отображает детальную информацию по каждому реактору, включая температуру, текущую генерацию энергии, тип реактора, статус включения, уровень хладагента в буфере, индивидуальный отсчёт времени до распада топливных стержней и данные о потреблении жидкости. В общем статусе комплекса выводится количество установленных реакторов и текущее состояние системы.",
+        "Графический интерфейс программы отображает детальную информацию по каждому реактору, включая температуру, текущую генерацию энергии, тип реактора, статус включения, индивидуальный отсчёт времени до распада топливных стержней. В общем статусе комплекса выводится количество установленных реакторов и текущее состояние системы.",
         "",
         "Программа поддерживает управление и получение информации через игровой чат с использованием Chat Box. Это позволяет запускать и останавливать реакторы, получать статус комплекса, изменять параметры безопасности и управлять списком пользователей без прямого взаимодействия с интерфейсом компьютера. Реализована система пользователей и прав доступа, а также гибкая конфигурация с пользовательскими настройками.",
         "",
@@ -2627,7 +2330,6 @@ local function handleChatCommand(nick, msg, args)
             chatBox.say("§a@useradd - добавить пользователя (пример: @useradd Ник)") -- Сделай
             chatBox.say("§a@userdel - удалить пользователя (пример: @userdel Ник)")
             chatBox.say("§a@status - статус системы")
-            chatBox.say("§a@setporog - установка порога жидкости (пример: @setporog 500)")
             chatBox.say("§a@start - запуск всех реакторов (или @start 1 для запуска только 1-го)")
             chatBox.say("§a@stop - остановка всех реакторов (или @stop 1 для остановки только 1-го)")
             chatBox.say("§a@exit - выход из программы")
@@ -2655,10 +2357,7 @@ local function handleChatCommand(nick, msg, args)
                 chatBox.say("§aЗапущены: " .. table.concat(running, ", "))
             end
 
-            chatBox.say("§aЖидкости в МЭ: " .. fluidInMe .. " Mb")
-            chatBox.say("§aПорог: " .. porog .. " Mb")
             chatBox.say("§aГенерация реакторов: " .. rf .. " RF/t")
-            chatBox.say("§aОбщее потребление жидкости реакторами: " .. consumeSecond .. " mB/s")
             -- chatBox.say("§aСостояние реакторов:")
             -- for i = 1, reactors do
             --     if reactor_work[i] == true then
@@ -2667,9 +2366,6 @@ local function handleChatCommand(nick, msg, args)
             --         chatBox.say("§aВыработка: §e" .. reactor_rf[i] .. " RF/t")
             --         chatBox.say("§aРаспад топлива через: §e" .. secondsToHMS(reactor_depletionTime[i] or 0))
             --         chatBox.say("§aТип реактора: §e" .. reactor_type[i])
-            --         if reactor_type[i] == "Fluid" then
-            --             chatBox.say("§aПотребление жидкости: §e" .. reactor_consume[i] .. " mB/s")
-            --         end
             --     else
             --         chatBox.say("§aРеактор " .. i .. ": §cОстановлен")
             --     end
@@ -2710,24 +2406,6 @@ local function handleChatCommand(nick, msg, args)
             end
         end
 
-    elseif msg:match("^@setporog") then
-        local newPorog = tonumber(args:match("^(%d+)"))
-        if newPorog then
-            if newPorog <= 0 then
-                chatBox.say("§cПорог жидкости не может быть отрицательным или нулевым!")
-            else
-                porog = newPorog
-                if isChatBox then
-                    chatBox.say("§2Порог жидкости установлен на " .. porog .. " Mb")
-                end
-            end
-        else
-            if isChatBox then
-                chatBox.say("§aЧтобы изменить порог жидкости, используйте: @setporog <значение>")
-                chatBox.say("§aПример: @setporog 500")
-            end
-        end
-        
     elseif msg == "@info" then
         if isChatBox then
             chatBox.say("§bReactor Control v" .. version .. " Build " .. build)
@@ -2876,8 +2554,6 @@ end
 -- ----------------------------------------------------------------------------------------------------
 
 local function handleTouch(x, y, uuid)
-    local fl_y1 = config.clickAreaPorogPlus.y1
-    if flux_network == true then fl_y1 = config.clickAreaPorogPlus.y2 end
     if y >= config.clickArea1.y1 and
         y <= config.clickArea1.y2 and 
         x >= config.clickArea1.x1 and 
@@ -3018,7 +2694,6 @@ local function handleTouch(x, y, uuid)
         animatedButton(1, 68, 44, "Пр.Обновить МЭ", nil, nil, 18, nil, nil, 0x38afff)
         animatedButton(2, 68, 44, "Пр.Обновить МЭ", nil, nil, 18, nil, nil, 0x38afff)
         buffer.drawChanges()
-        checkFluid()
         os.sleep(0.2)
         animatedButton(1, 68, 44, "Пр.Обновить МЭ", nil, nil, 18, nil, nil, nil)
         buffer.drawChanges()
@@ -3064,35 +2739,6 @@ local function handleTouch(x, y, uuid)
         animatedButton(1, 68, 47, "Метрика: " .. status_metric, nil, nil, 18, nil, nil, colors.whitebtn)
         drawDynamic()
     elseif
-    
-        y >= fl_y1 and
-        y <= fl_y1 and 
-        x >= config.clickAreaPorogPlus.x1 and 
-        x <= config.clickAreaPorogPlus.x2 then
-
-        porog = porog + 2500
-        saveCfg()
-        drawDigit(124, fl_y1, brail_greenbtn, 0x5f9300)
-        buffer.drawChanges()
-        os.sleep(0.2)
-        drawPorog()
-    elseif
-        y >= fl_y1 and
-        y <= fl_y1 and
-        x >= config.clickAreaPorogMinus.x1 and
-        x <= config.clickAreaPorogMinus.x2 then
-        if porog > 0 then
-            porog = porog - 2500
-            saveCfg()
-            if porog == 27500 then
-                message("Порог ниже рекомендованного!", colors.msgwarn)
-            end     
-        end
-        drawDigit(126, fl_y1, brail_redbtn, 0x9d0000)
-        buffer.drawChanges()
-        os.sleep(0.2)
-        drawPorog()
-    end
     for i = 1, reactors do
         local clickArea = config["clickArea" .. (6 + i)]
         if y >= clickArea.y1 and y <= clickArea.y2 and x >= clickArea.x1 and x <= clickArea.x2 and reactor_aborted[i] == false or nil then
@@ -3146,8 +2792,6 @@ local function mainLoop()
     reactor_aborted = {}
     reactors_proxy = {}
     reactor_rf = {}
-    reactor_getcoolant = {}
-    reactor_maxcoolant = {}
     reactor_depletionTime = {}
     
     me_proxy = nil
@@ -3158,9 +2802,7 @@ local function mainLoop()
     minute = 0
     hour = 0
     last_me_address = nil
-    
-    if porog < 0 then porog = 0 end
-    
+
     switchTheme(theme)
     initReactors()
     local addr = initMe()
@@ -3192,7 +2834,6 @@ local function mainLoop()
         message("Реакторы не найдены!", colors.msgerror)
         message("Проверьте подключение реакторов!", colors.msgerror, 34)
     end
-    checkFluid()
     if starting == true then
         start()
     end
@@ -3214,19 +2855,6 @@ local function mainLoop()
             return
         end
         return
-    end
-    if offFluid == true then
-        for i = 1, reactors do
-            if reactor_type[i] == "Fluid" then
-                if reactor_work[i] == true then
-                    stop(i)
-                end
-                updateReactorData(i)
-                reactor_aborted[i] = true
-            end
-        end
-        drawFluidinfo()
-        drawWidgets()
     end
     if isFirstStart == true then
         drawSettingsMenu()
@@ -3254,23 +2882,9 @@ local function mainLoop()
         if meChanged() then
             os.sleep(1)
             initMe()
-            checkFluid()
             message("МЭ система обновленна", colors.textclr)
         end
 
-        if offFluid == true then
-            for i = 1, reactors do
-                if reactor_type[i] == "Fluid" then
-                    if reactor_work[i] == true then
-                        stop(i)
-                        updateReactorData(i)
-                        reactor_aborted[i] = true
-                        drawFluidinfo()
-                        drawWidgets()
-                    end
-                end
-            end
-        end
 
         if now - lastTime >= 1 then
             lastTime = now
@@ -3284,38 +2898,21 @@ local function mainLoop()
                         local proxy = reactors_proxy[i]
                         if proxy and proxy.getTemperature then
                             reactor_rf[i] = safeCall(proxy, "getEnergyGeneration", 0)
-                            reactor_maxcoolant[i] = safeCall(proxy, "getMaxFluidCoolant", 0) or 1
                         else
                             reactor_rf[i] = 0
-                            reactor_maxcoolant[i] = 1
                         end
                         
                     end
                     drawRFinfo()
                 end
 
-                if second % 2 == 0 then
-                    for i = 1, reactors do
-                        if reactor_type[i] == "Fluid" then
-                            local proxy = reactors_proxy[i]
-                            if proxy and proxy.getFluidCoolant then
-                                temperature[i]  = safeCall(proxy, "getTemperature", 0)
-                                reactor_getcoolant[i] = safeCall(proxy, "getFluidCoolant", 0) or 0
-                            else
-                                reactor_getcoolant[i] = 0
-                                temperature[i] = 0
-                            end
-                        end
-                        
-                    end
-                end
             -- else -- Убрал else возможно временно если будут баги
                 if second % 13 == 0 then
                     for i = 1, reactors do
                         local proxy = reactors_proxy[i]
                         if proxy and proxy.hasWork then
                             reactor_work[i] = safeCall(proxy, "hasWork", false)
-                            reactor_type[i] = safeCall(proxy, "isActiveCooling", false) and "Fluid" or "Air"
+                            reactor_type[i] = "Air"
                         else
                             reactor_work[i] = false
                         end
@@ -3323,35 +2920,7 @@ local function mainLoop()
                     end
                 end
             end
-            for i = 1, reactors do
-                if reactor_type[i] == "Fluid" then
-                    local current_coolant = reactor_getcoolant[i]
-                    local max_coolant = reactor_maxcoolant[i]
-                    
-                    -- 1. Проверка на аварийную остановку (ниже 60%)
-                    if current_coolant <= (max_coolant * 0.68) then
-                        if reactor_work[i] == true then
-                            silentstop(i)
-                            -- updateReactorData(i)
-                            reactor_aborted[i] = true
-                            reason = "Нет жидкости"
-                            message("Реактор " .. i .. " ОСТАНОВЛЕН! Уровень буфера критически низок", colors.msgwarn)
-                            message("Проверьте реакторную зону!", colors.msgwarn)
-                            -- message("Запуск реактора #" .. i .. " возможен только вручную.", colors.msgwarn)
-                        end
-                    end
-
-                    -- 2. Проверка на готовность к запуску (выше 80%)
-                    -- Это позволит убрать флаг ошибки, когда бак достаточно заполнится
-                    if reactor_aborted[i] and current_coolant >= (max_coolant * 0.8) and offFluid == false then
-                        reactor_aborted[i] = false
-                        message("Реактор " .. i .. " готов к работе (уровень восстановился).", colors.msginfo)
-                    end
-                end
-            end
-
             if second % 5 == 0 then
-                consumeSecond = getTotalFluidConsumption()
                 drawStatus()
                 drawFluxRFinfo()
                 if flux_network == true and flux_checked == false then
@@ -3388,18 +2957,6 @@ local function mainLoop()
                     minute = 0
                 end
                 second = 0
-            end
-            if MeSecond >= 60 then
-                checkFluid()
-                if offFluid == true then
-                    for i = 1, reactors do
-                        if reactor_type[i] == "Fluid" and reactor_work[i] then
-                            stop(i)
-                            updateReactorData(i)
-                            reactor_aborted[i] = true
-                        end
-                    end
-                end
             end
             drawTimeInfo()
             drawWidgets()
