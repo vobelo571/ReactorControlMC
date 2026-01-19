@@ -202,6 +202,15 @@ local rod_order = {
     "htc_reactors:quad_ksirviz_fuel_rod",
 }
 
+local rod_aliases = {
+    ["quad_uranium_fuel_rod"] = "htc_reactors:quad_uranium_fuel_rod",
+    ["sixteen_uraium_fuel_rod"] = "htc_reactors:sixteen_uraium_fuel_rod",
+    ["quad_mox_fuel_rod"] = "htc_reactors:quad_mox_fuel_rod",
+    ["sixteen_mox_fuel_rod"] = "htc_reactors:sixteen_mox_fuel_rod",
+    ["quad_californium_fuel_rod"] = "htc_reactors:quad_californium_fuel_rod",
+    ["quad_ksirviz_fuel_rod"] = "htc_reactors:quad_ksirviz_fuel_rod",
+}
+
 local function brailleChar(dots)
     return unicode.char(
         10240 +
@@ -512,7 +521,24 @@ local function initMe()
     current_me_address = nil
     offFluid = false
     reason = nil
-    return nil
+
+    if component.isAvailable("me_interface") then
+        for address in component.list("me_interface") do
+            current_me_address = address
+            me_proxy = component.proxy(address)
+            me_network = me_proxy ~= nil
+            break
+        end
+    elseif component.isAvailable("me_controller") then
+        for address in component.list("me_controller") do
+            current_me_address = address
+            me_proxy = component.proxy(address)
+            me_network = me_proxy ~= nil
+            break
+        end
+    end
+
+    return current_me_address
 end
 
 local function initChatBox()
@@ -1229,8 +1255,30 @@ local function extractRodId(rod)
         rod[1], rod[2], rod[3], rod.stack, rod.itemStack
     }
     for _, value in ipairs(candidates) do
-        if type(value) == "string" and value:find(":") then
-            return value
+        if type(value) == "string" then
+            if value:find(":") then
+                return value
+            end
+            local key = value:lower()
+            key = key:gsub("%s+", "_")
+            key = key:gsub("[-]", "_")
+            if rod_aliases[key] then
+                return rod_aliases[key]
+            end
+            local hasQuad = key:find("quad") or key:find("x4") or key:find("4x")
+            local hasSixteen = key:find("sixteen") or key:find("x16") or key:find("16x") or key:find("16")
+            if key:find("uran") then
+                return hasSixteen and "htc_reactors:sixteen_uraium_fuel_rod" or (hasQuad and "htc_reactors:quad_uranium_fuel_rod" or nil)
+            end
+            if key:find("mox") then
+                return hasSixteen and "htc_reactors:sixteen_mox_fuel_rod" or (hasQuad and "htc_reactors:quad_mox_fuel_rod" or nil)
+            end
+            if key:find("californium") then
+                return "htc_reactors:quad_californium_fuel_rod"
+            end
+            if key:find("ksir") or key:find("viz") then
+                return "htc_reactors:quad_ksirviz_fuel_rod"
+            end
         elseif type(value) == "table" then
             local nested = value.name or value.id or value.item or value.itemName or value.itemId or value[1]
             if type(nested) == "string" and nested:find(":") then
