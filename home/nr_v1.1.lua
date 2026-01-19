@@ -143,8 +143,6 @@ local reactor_missingRods = {}
 local reactor_rodType = {}
 local reactor_rodCount = {}
 local reactor_rodExpected = {}
-local reactor_rodSlotsPresent = {}
-local reactor_rodSlotsTotal = {}
 local reactor_rodMultiplier = {}
 local reactor_rodLevel = {}
 
@@ -1832,15 +1830,6 @@ local function collectSmallIntsOnce(rod)
     return out
 end
 
-local function extractRodStackCount(rod)
-    if type(rod) ~= "table" then return nil end
-    local c = tonumber(rod.size) or tonumber(rod.count) or tonumber(rod.amount) or tonumber(rod.qty)
-    if not c then return nil end
-    if c % 1 ~= 0 then return nil end
-    if c < 0 or c > 64 then return nil end
-    return math.floor(c)
-end
-
 local function detectReactorRodInfo(reactorNum)
     local ok = pcall(function()
         local proxy = reactors_proxy[reactorNum]
@@ -1848,8 +1837,6 @@ local function detectReactorRodInfo(reactorNum)
             reactor_rodType[reactorNum] = "-"
             reactor_rodCount[reactorNum] = 0
             reactor_rodExpected[reactorNum] = 0
-            reactor_rodSlotsPresent[reactorNum] = 0
-            reactor_rodSlotsTotal[reactorNum] = 0
             reactor_rodMultiplier[reactorNum] = 1
             reactor_rodLevel[reactorNum] = 1
             return
@@ -1860,21 +1847,16 @@ local function detectReactorRodInfo(reactorNum)
             reactor_rodType[reactorNum] = "-"
             reactor_rodCount[reactorNum] = 0
             reactor_rodExpected[reactorNum] = 0
-            reactor_rodSlotsPresent[reactorNum] = 0
-            reactor_rodSlotsTotal[reactorNum] = 0
             reactor_rodMultiplier[reactorNum] = 1
             reactor_rodLevel[reactorNum] = 1
             return
         end
 
         local slotCount = #rods
-        local presentSlots = 0
-        local presentItemsKnown = 0
-        local presentSlotsKnown = 0
+        local totalRodCount = 0
         local typeCounts = {}
         local multCounts = {}
         local levelCounts = {}
-        local maxLevelCandidate = 1
 
         local function addType(rawId)
             local t = normalizeRodType(rawId) or tostring(rawId or "")
@@ -1892,41 +1874,29 @@ local function detectReactorRodInfo(reactorNum)
             n = tonumber(n)
             if not n or n < 2 or n > 64 then return end
             levelCounts[n] = (levelCounts[n] or 0) + 1
-            if n > maxLevelCandidate then
-                maxLevelCandidate = n
-            end
         end
 
         for _, rod in ipairs(rods) do
             if type(rod) == "table" then
                 local id = extractRodIdentity(rod)
-                local c = extractRodStackCount(rod)
-                local occupied = (id ~= nil) or ((c or 0) > 0)
-                if occupied then
-                    presentSlots = presentSlots + 1
-                end
-
                 if id then
+                    local rodCount = tonumber(rod.size) or tonumber(rod.count) or 1
+                    totalRodCount = totalRodCount + rodCount
                     addType(id)
-                end
 
-                -- уровень: НЕ берём из c (он может падать при выгорании), берём из структуры/методов
-                for _, n in ipairs(collectSmallIntsOnce(rod)) do
-                    addLevelCandidate(n)
-                end
-
-                local strings = collectStrings(rod)
-                for _, s in ipairs(strings) do
-                    local m = parseRodMultiplierFromText(s)
-                    if m then
-                        addMult(m)
-                        break
+                    -- уровень берём по моде среди маленьких чисел в записи rod[...] (включая строковые "6")
+                    for _, n in ipairs(collectSmallIntsOnce(rod)) do
+                        addLevelCandidate(n)
                     end
-                end
 
-                if occupied and c ~= nil then
-                    presentItemsKnown = presentItemsKnown + c
-                    presentSlotsKnown = presentSlotsKnown + 1
+                    local strings = collectStrings(rod)
+                    for _, s in ipairs(strings) do
+                        local m = parseRodMultiplierFromText(s)
+                        if m then
+                            addMult(m)
+                            break
+                        end
+                    end
                 end
             end
         end
@@ -1937,31 +1907,14 @@ local function detectReactorRodInfo(reactorNum)
                 bestLevel, bestLevelCount = lvl, c
             end
         end
-        -- сначала пытаемся взять уровень из методов контроллера (самый стабильный вариант)
-        local methodLevel = getReactorLevel(proxy)
-        if methodLevel and tonumber(methodLevel) and tonumber(methodLevel) > 1 then
-            bestLevel = tonumber(methodLevel)
-        elseif bestLevelCount == 0 then
-            bestLevel = methodLevel or 1
-        end
-        -- если метод вернул 1, но мы нашли кандидаты — берём максимальный (обычно это реальный "уровень", даже если часть слотов уже < level)
-        if (tonumber(bestLevel) or 1) <= 1 and maxLevelCandidate > 1 then
-            bestLevel = maxLevelCandidate
+        if bestLevelCount == 0 then
+            bestLevel = getReactorLevel(proxy)
         end
         if bestLevel < 1 then bestLevel = 1 end
         reactor_rodLevel[reactorNum] = bestLevel
 
+        local present = totalRodCount
         local expected = slotCount * bestLevel
-        local unknownSlots = presentSlots - presentSlotsKnown
-        if unknownSlots < 0 then unknownSlots = 0 end
-        local present = presentItemsKnown + (unknownSlots * bestLevel)
-        -- защита от выхода за пределы
-        if present < 0 then present = 0 end
-        if expected < 0 then expected = 0 end
-        if present > expected then present = expected end
-
-        reactor_rodSlotsPresent[reactorNum] = presentSlots
-        reactor_rodSlotsTotal[reactorNum] = slotCount
 
         local bestType, bestTypeCount = nil, 0
         local distinctTypes = 0
@@ -2005,8 +1958,6 @@ local function detectReactorRodInfo(reactorNum)
         reactor_rodType[reactorNum] = "-"
         reactor_rodCount[reactorNum] = 0
         reactor_rodExpected[reactorNum] = 0
-        reactor_rodSlotsPresent[reactorNum] = 0
-        reactor_rodSlotsTotal[reactorNum] = 0
         reactor_rodMultiplier[reactorNum] = 1
         reactor_rodLevel[reactorNum] = 1
     end
@@ -2022,14 +1973,12 @@ updateReactorRodsState = function(reactorNum)
     -- также обновляем запомненную информацию о типе/кратности/кол-ве
     detectReactorRodInfo(reactorNum)
 
-    -- ВАЖНО: для безопасности “не все стержни установлены” считаем по СЛОТАМ,
-    -- а не по кол-ву предметов в стеке (они могут частично выгорать).
-    local totalSlots = tonumber(reactor_rodSlotsTotal[reactorNum]) or 0
-    local presentSlots = tonumber(reactor_rodSlotsPresent[reactorNum]) or 0
-    if totalSlots <= 0 then
+    local exp = tonumber(reactor_rodExpected[reactorNum]) or 0
+    local cnt = tonumber(reactor_rodCount[reactorNum]) or 0
+    if exp <= 0 then
         reactor_missingRods[reactorNum] = false
     else
-        reactor_missingRods[reactorNum] = (presentSlots < totalSlots)
+        reactor_missingRods[reactorNum] = (cnt < exp)
     end
 end
 
