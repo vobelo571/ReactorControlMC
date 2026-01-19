@@ -437,8 +437,6 @@ local function initReactors()
     end
     for i = 1, reactors do
         reactor_rf[i] = 0
-        reactor_getcoolant[i] = 0
-        reactor_maxcoolant[i] = 0
         temperature[i] = 0
         reactor_aborted[i] = false
         reactor_depletionTime[i] = 0
@@ -461,7 +459,6 @@ local function initMe()
             current_me_address = nil
         end
     else
-        offFluid = true
         reason = "МЭ не найдена!"
     end
     return current_me_address
@@ -1801,23 +1798,17 @@ local function drawSettingsMenu()
     -- Заголовки
     buffer.drawText(modalX + 11, modalY + 1, 0x000000, "Меню настроек приложения ReactorControl v" .. version .. "." .. build)
 
-    buffer.drawText(modalX + 7, modalY + 3, 0x000000, "Порог жидкости")
-    createSearchField(modalX + 3, modalY + 5, 22, "Введите порог(Mb)")
-    searchFields[1].text = tostring(porog)
-    local offset = unicode.len(searchFields[1].text) + 1
-    searchFields[1].cursorPos = offset
-
-    buffer.drawText(modalX + 5, modalY + 7, 0x000000, "Тема по умолчанию")
-    animatedButton(1, modalX + 4, modalY + 8, "Светлая      ", nil, nil, 20, nil, nil, 0x444444, 0xffffff)
-    local sw1_x, sw1_y, sw1_w = modalX+16, modalY+9, 7
+    buffer.drawText(modalX + 5, modalY + 3, 0x000000, "Тема по умолчанию")
+    animatedButton(1, modalX + 4, modalY + 4, "Светлая      ", nil, nil, 20, nil, nil, 0x444444, 0xffffff)
+    local sw1_x, sw1_y, sw1_w = modalX+16, modalY+5, 7
     local sw1_state = theme -- текущее состояние
     local sw1_pipePos = (sw1_state and (sw1_w - 2) or 1)   -- позиция (1 - лево, sw1_w-2 - право)
     drawSwitch(sw1_x, sw1_y, sw1_w, sw1_pipePos, sw1_state, nil, 0x777777, nil, 0x444444)
 
 
-    buffer.drawText(modalX + 3, modalY + 15, 0x000000, "Расширенное логирование")
-    animatedButton(1, modalX + 4, modalY + 16, "Включенно         ", nil, nil, 20, nil, nil, 0x444444, 0xffffff)
-    local sw3_x, sw3_y, sw3_w = modalX+16, modalY+17, 7
+    buffer.drawText(modalX + 3, modalY + 11, 0x000000, "Расширенное логирование")
+    animatedButton(1, modalX + 4, modalY + 12, "Включенно         ", nil, nil, 20, nil, nil, 0x444444, 0xffffff)
+    local sw3_x, sw3_y, sw3_w = modalX+16, modalY+13, 7
     local sw3_state = debugLog -- текущее состояние
     local sw3_pipePos = (sw3_state and (sw3_w - 2) or 1)   -- позиция (1 - лево, sw3_w-2 - право)
     drawSwitch(sw3_x, sw3_y, sw3_w, sw3_pipePos, sw3_state, nil, 0x777777, nil, 0x444444)
@@ -1900,7 +1891,6 @@ local function drawSettingsMenu()
 
     local themetoggle = theme
 
-    local NSporog = porog
     local NSTheme = theme
     local NSDebugLog = debugLog
     local NSusers = {}
@@ -1967,7 +1957,6 @@ local function drawSettingsMenu()
                     start()
                 end
                 theme = NSTheme
-                porog = NSporog
                 debugLog = NSDebugLog
                 users = NSusers
                 saveCfg()
@@ -2060,7 +2049,6 @@ local function drawSettingsMenu()
                 animatedButton(1, modalX + 5, modalY + modalH - 4, "Сохранить и выйти", nil, nil, 18, nil, nil, 0x8100cc, 0xffffff)
                 buffer.drawChanges()
                 -- Сохраняем настройки
-                porog = tonumber(searchFields[1].text) or porog
                 theme = sw1_state
                 debugLog = sw3_state
                 saveCfg()
@@ -2215,11 +2203,9 @@ local function drawInfoMenu()
         "Описание программы:",
         "Reactor Control — программа мониторинга, контроля и управления критически важными системами реакторного комплекса для игроков сервера McSkill HiTech 1.12.2, разработанная на базе мода OpenComputers. Программа предназначена для централизованного управления реакторами и связанными с ними инфраструктурными системами, а также для автоматического предотвращения аварийных ситуаций без необходимости постоянного ручного контроля.",
         "",
-        "Программа поддерживает работу с жидкостными и воздушными HT-реакторами, интеграцию с Applied Energistics 2 для мониторинга и анализа жидкостей, а также интеграцию с Flux Networks для контроля энергетической сети. Подключение осуществляется через адаптеры OpenComputers к соответствующим контроллерам. Основной упор сделан на стабильность, безопасность и корректную работу реакторных комплексов любого масштаба.",
+        "Программа поддерживает работу с HT-реакторами и интеграцию с Flux Networks для контроля энергетической сети. Подключение осуществляется через адаптеры OpenComputers к соответствующим контроллерам. Основной упор сделан на стабильность, безопасность и корректную работу реакторных комплексов любого масштаба.",
         "",
-        "Реализована автоматическая система безопасности для жидкостных реакторов. При снижении уровня хладагента в МЭ-сети ниже заданного порога либо при полной недоступности МЭ-сети реакторы автоматически отключаются и переводятся в аварийный режим, в котором ручной запуск блокируется. После восстановления нормальных условий реакторы автоматически возвращаются в штатный режим и запускаются. Воздушные реакторы при проблемах с жидкостью не затрагиваются. Контроль состояния сетей и жидкостей выполняется на постоянной основе.",
-        "",
-        "Графический интерфейс программы отображает детальную информацию по каждому реактору, включая температуру, текущую генерацию энергии, тип реактора, статус включения, уровень хладагента в буфере, индивидуальный отсчёт времени до распада топливных стержней и данные о потреблении жидкости. В общем статусе комплекса выводится количество установленных реакторов и текущее состояние системы.",
+        "Графический интерфейс программы отображает детальную информацию по каждому реактору, включая температуру, текущую генерацию энергии, тип реактора, статус включения и индивидуальный отсчёт времени до распада топливных стержней. В общем статусе комплекса выводится количество установленных реакторов и текущее состояние системы.",
         "",
         "Программа поддерживает управление и получение информации через игровой чат с использованием Chat Box. Это позволяет запускать и останавливать реакторы, получать статус комплекса, изменять параметры безопасности и управлять списком пользователей без прямого взаимодействия с интерфейсом компьютера. Реализована система пользователей и прав доступа, а также гибкая конфигурация с пользовательскими настройками.",
         "",
@@ -2803,34 +2789,6 @@ local function handleTouch(x, y, uuid)
         os.sleep(0.2)
         animatedButton(1, 68, 47, "Метрика: " .. status_metric, nil, nil, 18, nil, nil, colors.whitebtn)
         drawDynamic()
-    elseif
-    
-        y >= fl_y1 and
-        y <= fl_y1 and 
-        x >= config.clickAreaPorogPlus.x1 and 
-        x <= config.clickAreaPorogPlus.x2 then
-
-        porog = porog + 2500
-        saveCfg()
-        drawDigit(124, fl_y1, brail_greenbtn, 0x5f9300)
-        buffer.drawChanges()
-        os.sleep(0.2)
-    elseif
-        y >= fl_y1 and
-        y <= fl_y1 and
-        x >= config.clickAreaPorogMinus.x1 and
-        x <= config.clickAreaPorogMinus.x2 then
-        if porog > 0 then
-            porog = porog - 2500
-            saveCfg()
-            if porog == 27500 then
-                message("Порог ниже рекомендованного!", colors.msgwarn)
-            end     
-        end
-        drawDigit(126, fl_y1, brail_redbtn, 0x9d0000)
-        buffer.drawChanges()
-        os.sleep(0.2)
-    end
     for i = 1, reactors do
         local clickArea = config["clickArea" .. (6 + i)]
         if y >= clickArea.y1 and y <= clickArea.y2 and x >= clickArea.x1 and x <= clickArea.x2 and reactor_aborted[i] == false or nil then
@@ -2884,8 +2842,6 @@ local function mainLoop()
     reactor_aborted = {}
     reactors_proxy = {}
     reactor_rf = {}
-    reactor_getcoolant = {}
-    reactor_maxcoolant = {}
     reactor_depletionTime = {}
     
     me_proxy = nil
@@ -2897,7 +2853,6 @@ local function mainLoop()
     hour = 0
     last_me_address = nil
     
-    if porog < 0 then porog = 0 end
     
     switchTheme(theme)
     initReactors()
@@ -2953,18 +2908,6 @@ local function mainLoop()
         end
         return
     end
-    if offFluid == true then
-        for i = 1, reactors do
-            if reactor_type[i] == "Fluid" then
-                if reactor_work[i] == true then
-                    stop(i)
-                end
-                updateReactorData(i)
-                reactor_aborted[i] = true
-            end
-        end
-        drawWidgets()
-    end
     if isFirstStart == true then
         drawSettingsMenu()
         message("Первый запуск программы завершен!", colors.msginfo)
@@ -2994,18 +2937,6 @@ local function mainLoop()
             message("МЭ система обновленна", colors.textclr)
         end
 
-        if offFluid == true then
-            for i = 1, reactors do
-                if reactor_type[i] == "Fluid" then
-                    if reactor_work[i] == true then
-                        stop(i)
-                        updateReactorData(i)
-                        reactor_aborted[i] = true
-                        drawWidgets()
-                    end
-                end
-            end
-        end
 
         if now - lastTime >= 1 then
             lastTime = now
@@ -3019,10 +2950,8 @@ local function mainLoop()
                         local proxy = reactors_proxy[i]
                         if proxy and proxy.getTemperature then
                             reactor_rf[i] = safeCall(proxy, "getEnergyGeneration", 0)
-                            reactor_maxcoolant[i] = safeCall(proxy, "getMaxFluidCoolant", 0) or 1
                         else
                             reactor_rf[i] = 0
-                            reactor_maxcoolant[i] = 1
                         end
                         
                     end
@@ -3040,32 +2969,6 @@ local function mainLoop()
                             reactor_work[i] = false
                         end
                         
-                    end
-                end
-            end
-            for i = 1, reactors do
-                if reactor_type[i] == "Fluid" then
-                    local current_coolant = reactor_getcoolant[i]
-                    local max_coolant = reactor_maxcoolant[i]
-                    
-                    -- 1. Проверка на аварийную остановку (ниже 60%)
-                    if current_coolant <= (max_coolant * 0.68) then
-                        if reactor_work[i] == true then
-                            silentstop(i)
-                            -- updateReactorData(i)
-                            reactor_aborted[i] = true
-                            reason = "Нет жидкости"
-                            message("Реактор " .. i .. " ОСТАНОВЛЕН! Уровень буфера критически низок", colors.msgwarn)
-                            message("Проверьте реакторную зону!", colors.msgwarn)
-                            -- message("Запуск реактора #" .. i .. " возможен только вручную.", colors.msgwarn)
-                        end
-                    end
-
-                    -- 2. Проверка на готовность к запуску (выше 80%)
-                    -- Это позволит убрать флаг ошибки, когда бак достаточно заполнится
-                    if reactor_aborted[i] and current_coolant >= (max_coolant * 0.8) and offFluid == false then
-                        reactor_aborted[i] = false
-                        message("Реактор " .. i .. " готов к работе (уровень восстановился).", colors.msginfo)
                     end
                 end
             end
@@ -3110,15 +3013,7 @@ local function mainLoop()
                 second = 0
             end
             if MeSecond >= 60 then
-                if offFluid == true then
-                    for i = 1, reactors do
-                        if reactor_type[i] == "Fluid" and reactor_work[i] then
-                            stop(i)
-                            updateReactorData(i)
-                            reactor_aborted[i] = true
-                        end
-                    end
-                end
+                MeSecond = 0
             end
             drawTimeInfo()
             drawWidgets()
