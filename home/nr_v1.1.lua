@@ -3992,9 +3992,16 @@ local function mainLoop()
     end
 
     if isChatBox then
-        chatThread = require("thread").create(chatMessageHandler)
+        chatThread = require("thread").create(function()
+            local okChat, errChat = xpcall(chatMessageHandler, debug.traceback)
+            if not okChat then
+                logError("ChatThread Error:")
+                logError(errChat)
+                message("ChatThread Error: " .. shortenNameCentered(tostring(errChat), 34), colors.msgwarn, 34)
+            end
+        end)
         message("Чат-бокс подключен! Список команд: @help", colors.msginfo)
-        chatBox.say("§2Чат-бокс подключен! §aСписок команд: @help")
+        pcall(chatBox.say, "§2Чат-бокс подключен! §aСписок команд: @help")
     end
 
     if work == true then
