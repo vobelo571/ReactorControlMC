@@ -212,6 +212,12 @@ local rod_aliases = {
     ["sixteen_mox_fuel_rod"] = "htc_reactors:sixteen_mox_fuel_rod",
     ["quad_californium_fuel_rod"] = "htc_reactors:quad_californium_fuel_rod",
     ["quad_ksirviz_fuel_rod"] = "htc_reactors:quad_ksirviz_fuel_rod",
+    ["htc_reactor:quad_uranium_fuel_rod"] = "htc_reactors:quad_uranium_fuel_rod",
+    ["htc_reactor:sixteen_uraium_fuel_rod"] = "htc_reactors:sixteen_uraium_fuel_rod",
+    ["htc_reactor:quad_mox_fuel_rod"] = "htc_reactors:quad_mox_fuel_rod",
+    ["htc_reactor:sixteen_mox_fuel_rod"] = "htc_reactors:sixteen_mox_fuel_rod",
+    ["htc_reactor:quad_californium_fuel_rod"] = "htc_reactors:quad_californium_fuel_rod",
+    ["htc_reactor:quad_ksirviz_fuel_rod"] = "htc_reactors:quad_ksirviz_fuel_rod",
 }
 
 local function brailleChar(dots)
@@ -1258,6 +1264,9 @@ local function extractRodId(rod)
         if type(value) ~= "string" then
             return nil
         end
+        if value:find("^htc_reactor:") then
+            value = value:gsub("^htc_reactor:", "htc_reactors:")
+        end
         if value:find(":") then
             return value
         end
@@ -1267,18 +1276,18 @@ local function extractRodId(rod)
         if rod_aliases[key] then
             return rod_aliases[key]
         end
-        local hasQuad = key:find("quad") or key:find("x4") or key:find("4x")
-        local hasSixteen = key:find("sixteen") or key:find("x16") or key:find("16x") or key:find("16")
-        if key:find("uran") then
+        local hasQuad = key:find("quad") or key:find("x4") or key:find("4x") or key:find("четыр") or key:find("4шт")
+        local hasSixteen = key:find("sixteen") or key:find("x16") or key:find("16x") or key:find("16") or key:find("шестнад")
+        if key:find("uran") or key:find("уран") then
             return hasSixteen and "htc_reactors:sixteen_uraium_fuel_rod" or (hasQuad and "htc_reactors:quad_uranium_fuel_rod" or nil)
         end
-        if key:find("mox") then
+        if key:find("mox") or key:find("мокс") then
             return hasSixteen and "htc_reactors:sixteen_mox_fuel_rod" or (hasQuad and "htc_reactors:quad_mox_fuel_rod" or nil)
         end
-        if key:find("californium") then
+        if key:find("californium") or key:find("калиф") then
             return "htc_reactors:quad_californium_fuel_rod"
         end
-        if key:find("ksir") or key:find("viz") then
+        if key:find("ksir") or key:find("viz") or key:find("ксир") or key:find("виз") then
             return "htc_reactors:quad_ksirviz_fuel_rod"
         end
         if key:find("rod") or key:find("fuel_rod") or key:find("fuelrod") or key:find("стерж") or key:find("твэл") then
@@ -1334,7 +1343,7 @@ local function isRodId(id)
     end
     if type(id) == "string" then
         local key = id:lower()
-        if key:find("fuel_rod") or key:find("fuelrod") then
+        if key:find("fuel_rod") or key:find("fuelrod") or key:find("rod") or key:find("стерж") or key:find("твэл") then
             return true
         end
     end
@@ -1408,6 +1417,9 @@ local function countRodsFromStatus(proxy)
     for _, rod in ipairs(rods) do
         total = total + 1
         local id = extractRodId(rod)
+        if not id then
+            id = UNKNOWN_ROD_ID
+        end
         if id then
             counts[id] = (counts[id] or 0) + 1
         end
@@ -1427,13 +1439,12 @@ local function countRodsFromInventory(proxy)
         if type(stack) == "table" then
             local id = extractRodId(stack)
             if isRodId(id) then
-                local count = tonumber(stack.size) or tonumber(stack.count) or 1
-                counts[id] = (counts[id] or 0) + math.max(count, 1)
-                total = total + math.max(count, 1)
+                counts[id] = (counts[id] or 0) + 1
+                total = total + 1
             end
         end
     end
-    return counts, total, total
+    return counts, total, size
 end
 
 local function countRodsFromInventoryAllSides(proxy)
@@ -1454,9 +1465,8 @@ local function countRodsFromInventoryAllSides(proxy)
                 if type(stack) == "table" then
                     local id = extractRodId(stack)
                     if isRodId(id) then
-                        local count = tonumber(stack.size) or tonumber(stack.count) or 1
-                        counts[id] = (counts[id] or 0) + math.max(count, 1)
-                        total = total + math.max(count, 1)
+                        counts[id] = (counts[id] or 0) + 1
+                        total = total + 1
                     end
                 end
             end
@@ -1468,9 +1478,8 @@ local function countRodsFromInventoryAllSides(proxy)
                     if type(stack) == "table" then
                         local id = extractRodId(stack)
                         if isRodId(id) then
-                            local count = tonumber(stack.size) or tonumber(stack.count) or 1
-                            counts[id] = (counts[id] or 0) + math.max(count, 1)
-                            total = total + math.max(count, 1)
+                            counts[id] = (counts[id] or 0) + 1
+                            total = total + 1
                         end
                     end
                 end
@@ -1480,7 +1489,7 @@ local function countRodsFromInventoryAllSides(proxy)
     if not found then
         return nil
     end
-    return counts, total, total
+    return counts, total, (maxSlots > 0 and maxSlots or total)
 end
 
 local function formatRodCounts(counts)
