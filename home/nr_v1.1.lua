@@ -386,7 +386,7 @@ local function saveCfg(param)
 end
 
 local function switchTheme(val)
-    if theme == true then
+    if theme == 1 then
         colors = {
             bg = 0x000000,
             bg2 = 0x202020,
@@ -436,14 +436,14 @@ local function initReactors()
             break
         end
     end
-    for i = 1, reactors do
-        reactor_rf[i] = 0
-        temperature[i] = 0
-        reactor_aborted[i] = false
-        reactor_depletionTime[i] = 0
-        reactor_ConsumptionPerSecond[i] = 0
-        reactor_type[i] = "Air"
-        reactor_work[i] = false
+    for i = 1, 12 do
+        reactor_rf[i] = reactor_rf[i] or 0
+        temperature[i] = temperature[i] or 0
+        reactor_aborted[i] = reactor_aborted[i] or false
+        reactor_depletionTime[i] = reactor_depletionTime[i] or 0
+        reactor_ConsumptionPerSecond[i] = reactor_ConsumptionPerSecond[i] or 0
+        reactor_type[i] = reactor_type[i] or "Air"
+        reactor_work[i] = reactor_work[i] or false
     end
 end
 
@@ -1218,7 +1218,7 @@ end
 
 local function drawStatic()
     local picture
-    if theme == false then
+    if theme == 0 then
         picture = image.load(imgPath)
     else
         picture = image.load(imgPathWhite)
@@ -1507,7 +1507,6 @@ end
 local function silentstop(num)
     for i = num or 1, num or reactors do
         local proxy = reactors_proxy[i]
-        local rType = reactor_type[i]
         safeCall(proxy, "deactivate")
         reactor_work[i] = false
         if any_reactor_on == false then
@@ -2750,7 +2749,7 @@ local function handleTouch(x, y, uuid)
     elseif
     for i = 1, reactors do
         local clickArea = config["clickArea" .. (6 + i)]
-        if y >= clickArea.y1 and y <= clickArea.y2 and x >= clickArea.x1 and x <= clickArea.x2 and reactor_aborted[i] == false or nil then
+        if y >= clickArea.y1 and y <= clickArea.y2 and x >= clickArea.x1 and x <= clickArea.x2 and (reactor_aborted[i] == false or reactor_aborted[i] == nil) then
             local Rnum = i
             local xw, yw = widgetCoords[Rnum][1], widgetCoords[Rnum][2]
 
@@ -2791,6 +2790,8 @@ local function mainLoop()
     reactors = 0
     any_reactor_on = false
     any_reactor_off = false
+    theme = theme or 0
+    debugLog = debugLog or false
 
     -- Очищаем массивы вместо сброса каждого элемента.
     -- Это более надежно, так как гарантирует, что в массивах не останется старых данных.
@@ -2803,6 +2804,7 @@ local function mainLoop()
     temperature = {}
     reactor_depletionTime = {}
     reactor_ConsumptionPerSecond = {}
+    consoleLines = {}
     
     me_proxy = nil
     me_network = false
@@ -2817,7 +2819,7 @@ local function mainLoop()
     current_me_address = nil
     last_me_address = nil
 
-    switchTheme(theme)
+    -- switchTheme(theme)
     initReactors()
     local addr = initMe()
     initFlux()
@@ -2853,9 +2855,12 @@ local function mainLoop()
     end
 
     if isChatBox then
-        chatThread = require("thread").create(chatMessageHandler)
-        message("Чат-бокс подключен! Список команд: @help", colors.msginfo)
-        chatBox.say("§2Чат-бокс подключен! §aСписок команд: @help")
+        local threadLib = require("thread")
+        if threadLib then
+            chatThread = threadLib.create(chatMessageHandler)
+            message("Чат-бокс подключен! Список команд: @help", colors.msginfo)
+            chatBox.say("§2Чат-бокс подключен! §aСписок команд: @help")
+        end
     end
 
     if work == true then
