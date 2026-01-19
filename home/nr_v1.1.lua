@@ -1250,39 +1250,65 @@ local function extractRodId(rod)
     if type(rod) ~= "table" then
         return nil
     end
-    local candidates = {
+    local function normalizeToId(value)
+        if type(value) ~= "string" then
+            return nil
+        end
+        if value:find(":") then
+            return value
+        end
+        local key = value:lower()
+        key = key:gsub("%s+", "_")
+        key = key:gsub("[-]", "_")
+        if rod_aliases[key] then
+            return rod_aliases[key]
+        end
+        local hasQuad = key:find("quad") or key:find("x4") or key:find("4x")
+        local hasSixteen = key:find("sixteen") or key:find("x16") or key:find("16x") or key:find("16")
+        if key:find("uran") then
+            return hasSixteen and "htc_reactors:sixteen_uraium_fuel_rod" or (hasQuad and "htc_reactors:quad_uranium_fuel_rod" or nil)
+        end
+        if key:find("mox") then
+            return hasSixteen and "htc_reactors:sixteen_mox_fuel_rod" or (hasQuad and "htc_reactors:quad_mox_fuel_rod" or nil)
+        end
+        if key:find("californium") then
+            return "htc_reactors:quad_californium_fuel_rod"
+        end
+        if key:find("ksir") or key:find("viz") then
+            return "htc_reactors:quad_ksirviz_fuel_rod"
+        end
+        return nil
+    end
+
+    local direct = {
         rod.name, rod.id, rod.item, rod.itemName, rod.itemId, rod.type,
-        rod[1], rod[2], rod[3], rod.stack, rod.itemStack
+        rod[1], rod[2], rod[3], rod[4], rod[5], rod[6], rod.stack, rod.itemStack
     }
-    for _, value in ipairs(candidates) do
-        if type(value) == "string" then
-            if value:find(":") then
-                return value
-            end
-            local key = value:lower()
-            key = key:gsub("%s+", "_")
-            key = key:gsub("[-]", "_")
-            if rod_aliases[key] then
-                return rod_aliases[key]
-            end
-            local hasQuad = key:find("quad") or key:find("x4") or key:find("4x")
-            local hasSixteen = key:find("sixteen") or key:find("x16") or key:find("16x") or key:find("16")
-            if key:find("uran") then
-                return hasSixteen and "htc_reactors:sixteen_uraium_fuel_rod" or (hasQuad and "htc_reactors:quad_uranium_fuel_rod" or nil)
-            end
-            if key:find("mox") then
-                return hasSixteen and "htc_reactors:sixteen_mox_fuel_rod" or (hasQuad and "htc_reactors:quad_mox_fuel_rod" or nil)
-            end
-            if key:find("californium") then
-                return "htc_reactors:quad_californium_fuel_rod"
-            end
-            if key:find("ksir") or key:find("viz") then
-                return "htc_reactors:quad_ksirviz_fuel_rod"
-            end
-        elseif type(value) == "table" then
+    for _, value in ipairs(direct) do
+        local id = normalizeToId(value)
+        if id then
+            return id
+        end
+        if type(value) == "table" then
             local nested = value.name or value.id or value.item or value.itemName or value.itemId or value[1]
-            if type(nested) == "string" and nested:find(":") then
-                return nested
+            id = normalizeToId(nested)
+            if id then
+                return id
+            end
+        end
+    end
+
+    for _, value in pairs(rod) do
+        local id = normalizeToId(value)
+        if id then
+            return id
+        end
+        if type(value) == "table" then
+            for _, v2 in pairs(value) do
+                id = normalizeToId(v2)
+                if id then
+                    return id
+                end
             end
         end
     end
@@ -1354,10 +1380,10 @@ local function countRodsFromStatus(proxy)
     local counts = {}
     local total = 0
     for _, rod in ipairs(rods) do
+        total = total + 1
         local id = extractRodId(rod)
         if id then
             counts[id] = (counts[id] or 0) + 1
-            total = total + 1
         end
     end
     return counts, total, total
@@ -1501,16 +1527,16 @@ local function updateRodData(num)
         local totalCount = 0
         if proxy then
             counts, totalCount, maxCount = countRodsFromStatus(proxy)
-            if counts == nil or next(counts) == nil then
+            if counts == nil or (next(counts) == nil and (totalCount or 0) == 0) then
                 counts, totalCount, maxCount = countRodsFromInventory(proxy)
             end
-            if counts == nil or next(counts) == nil then
+            if counts == nil or (next(counts) == nil and (totalCount or 0) == 0) then
                 local aidx = reactor_adapter_index[i]
                 if aidx and adapters_proxy[aidx] then
                     counts, totalCount, maxCount = countRodsFromInventoryAllSides(adapters_proxy[aidx])
                 end
             end
-            if (counts == nil or next(counts) == nil) and #adapters_proxy > 0 then
+            if (counts == nil or (next(counts) == nil and (totalCount or 0) == 0)) and #adapters_proxy > 0 then
                 local foundCounts = nil
                 local foundTotal = 0
                 local foundMax = 0
@@ -1534,7 +1560,11 @@ local function updateRodData(num)
         end
         reactor_rod_counts[i] = counts or {}
         reactor_rod_summary[i] = formatRodCounts(counts)
-        reactor_rod_types[i] = formatRodTypes(counts)
+        if (totalCount or 0) > 0 and (counts == nil or next(counts) == nil) then
+            reactor_rod_types[i] = "Неизв."
+        else
+            reactor_rod_types[i] = formatRodTypes(counts)
+        end
         if counts == nil then
             reactor_rod_count[i] = nil
             reactor_rod_max[i] = nil
