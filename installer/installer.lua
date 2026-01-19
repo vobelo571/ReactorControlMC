@@ -1,8 +1,8 @@
 -- Reactor Control GUI Installer (std libs only)
 -- Author: Flixmo
--- ProgV 1.0
+-- ProgV 1.1.3
 ------------------------------------ config ------------------------------------
-local REPOSITORY  = "https://raw.githubusercontent.com/vobelo571/ReactorControlMC/refs/heads/main/"
+local REPOSITORY  = "https://raw.githubusercontent.com/Flixmo/Reactor-Control-for-OpenComputers/refs/heads/main/"
 
 local filesToDownload = {
   {url = REPOSITORY.."/lib/advancedLua.lua",                path="/lib/advancedLua.lua"},
@@ -15,7 +15,7 @@ local filesToDownload = {
   {url = REPOSITORY.."home/images/reactorGUI.pic",          path="/home/images/reactorGUI.pic"},
   {url = REPOSITORY.."home/images/reactorGUI_white.pic",    path="/home/images/reactorGUI_white.pic"},
 }
-local appTitle = "Reactor Control v1.0 — Installer"
+local appTitle = "Reactor Control v1.1 — Installer"
 local rebootAfter = true
 -------------------------------------------------------------------------------
 local computer  = require("computer")
@@ -89,7 +89,7 @@ local function drawChrome()
   frame(X,Y,W,H)
   -- title
   text(X+2, Y, "┤ "..appTitle.." ├", COL_TEXT)
-  text(X+W-20, Y, "[by vobelo571]", COL_DIM)
+  text(X+W-20, Y, "[by Flixmo]", COL_DIM)
   -- логотип
   text(X+W-15, Y+1, "☢ REACTOR", COL_WARN)
   -- секции
@@ -171,7 +171,7 @@ local function install()
     writeStatus("Completed with errors. Check log.", COL_WARN)
   end
 
-  text(X+2, Y+H-2, "by vobelo571 | Reactor Control Installer", COL_DIM)
+  text(X+2, Y+H-2, "by Flixmo | Reactor Control Installer", COL_DIM)
 
   if rebootAfter then
     for n=3,1,-1 do
