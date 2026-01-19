@@ -131,7 +131,6 @@ local widgetCoords = {
 }
 
 local config = {
-    clickArea19 = {x1=4,  y1=44, x2=9,  y2=46}, -- Кнопка 🔧 (x:5, y:44)
     clickArea20 = {x1=4,  y1=47, x2=9,  y2=49}, -- Кнопка ⓘ (x:5, y:47)
 
     clickArea1  = {x1=12,  y1=44, x2=37, y2=46}, -- Отключить реакторы (x:13, y:44)
@@ -1254,7 +1253,6 @@ local function drawStatic()
         buffer.drawText(1, 1, colors.msgerror, "Ошибка загрузки изображения! Проверьте наличие файлов 'image/reactorGUI.pic'")
         return
     end
-    animatedButton(1, 5, 44, "🔧", nil, nil, 4, nil, nil, 0xa91df9, 0xffffff)
     animatedButton(1, 5, 47, "ⓘ", nil, nil, 4, nil, nil, 0xa91df9, 0x05e2ff)
     animatedButton(1, 13, 44, "Отключить реакторы!", nil, nil, 24, nil, nil, 0xfd3232)
     animatedButton(1, 41, 44, "Запуск реакторов!", nil, nil, 23, nil, nil, 0x35e525)
@@ -2923,36 +2921,6 @@ local function handleTouch(x, y, uuid)
 
         os.sleep(0.3)
         drawDynamic()
-    elseif 
-        y >= config.clickArea19.y1 and
-        y <= config.clickArea19.y2 and 
-        x >= config.clickArea19.x1 and 
-        x <= config.clickArea19.x2 then
-        buffer.drawRectangle(4, 44, 6, 3, colors.bg3, 0, " ")
-        animatedButton(1, 5, 44, "🔧", nil, nil, 4, nil, nil, 0x8100cc, 0xffffff)
-        animatedButton(2, 5, 44, "🔧", nil, nil, 4, nil, nil, 0x8100cc, 0xffffff)
-        buffer.drawChanges()
-        
-        os.sleep(0.2)
-        animatedButton(1, 5, 44, "🔧", nil, nil, 4, nil, nil, 0xa91df9, 0xffffff)
-        buffer.drawChanges()
-        
-        drawSettingsMenu()
-    elseif 
-        y >= config.clickArea20.y1 and
-        y <= config.clickArea20.y2 and 
-        x >= config.clickArea20.x1 and 
-        x <= config.clickArea20.x2 then
-        buffer.drawRectangle(4, 47, 6, 3, colors.bg3, 0, " ")
-        animatedButton(1, 5, 47, "ⓘ", nil, nil, 4, nil, nil, 0x8100cc, 0x05e2ff)
-        animatedButton(2, 5, 47, "ⓘ", nil, nil, 4, nil, nil, 0x8100cc, 0x05e2ff)
-        buffer.drawChanges()
-        
-        os.sleep(0.2)
-        animatedButton(1, 5, 47, "ⓘ", nil, nil, 4, nil, nil, 0xa91df9, 0x05e2ff)
-        buffer.drawChanges()
-        
-        drawInfoMenu()    
     elseif 
         y >= config.clickArea4.y1 and
         y <= config.clickArea4.y2 and 
