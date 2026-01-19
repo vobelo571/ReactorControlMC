@@ -68,8 +68,8 @@ if not ok then
     return
 end
 
-if rodAutoByAddr == nil then rodAutoByAddr = {} end
-if rodPresetByAddr == nil then rodPresetByAddr = {} end
+if type(rodAutoByAddr) ~= "table" then rodAutoByAddr = {} end
+if type(rodPresetByAddr) ~= "table" then rodPresetByAddr = {} end
 
 local rodIdByType = {}
 
@@ -1548,8 +1548,17 @@ local function drawDynamic()
 
     -- -----------------------------------------------------------
 
-    drawWidgets()
-    drawRightMenu()
+    local okWidgets, errWidgets = pcall(drawWidgets)
+    if not okWidgets then
+        -- Не даём программе падать из-за UI: покажем причину справа
+        buffer.drawRectangle(123, 5, 35, (flux_network and 22 or 24), colors.bg, 0, " ")
+        buffer.drawText(124, 5, colors.msgerror, "UI Error:")
+        buffer.drawText(124, 6, colors.msgwarn, shortenNameCentered(tostring(errWidgets), 34))
+    end
+    local okRight = pcall(drawRightMenu)
+    if not okRight then
+        -- ignore
+    end
     buffer.drawChanges()
 end
 
