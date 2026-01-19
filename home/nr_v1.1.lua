@@ -107,7 +107,6 @@ local reactor_level = {}
 local adapters_proxy = {}
 local adapters_address = {}
 local reactor_adapter_index = {}
-local reactor_rod_source = {}
 local last_me_address = nil
 local me_network = false
 local me_proxy = nil
@@ -194,6 +193,8 @@ local rod_types = {
     ["htc_reactors:quad_californium_fuel_rod"] = "Калифорний x4",
     ["htc_reactors:quad_ksirviz_fuel_rod"] = "Ксирд.-Визамиум x4",
 }
+
+local UNKNOWN_ROD_ID = "__unknown_rod__"
 
 local rod_order = {
     "htc_reactors:quad_uranium_fuel_rod",
@@ -500,7 +501,6 @@ local function initReactors()
         reactor_rod_max[i] = 0
         reactor_rod_types[i] = "н/д"
         reactor_level[i] = 1
-        reactor_rod_source[i] = "none"
     end
 end
 
@@ -1281,6 +1281,9 @@ local function extractRodId(rod)
         if key:find("ksir") or key:find("viz") then
             return "htc_reactors:quad_ksirviz_fuel_rod"
         end
+        if key:find("rod") or key:find("fuel_rod") or key:find("fuelrod") or key:find("стерж") or key:find("твэл") then
+            return UNKNOWN_ROD_ID
+        end
         return nil
     end
 
@@ -1477,7 +1480,9 @@ local function formatRodCounts(counts)
         end
     end
     for id, count in pairs(counts) do
-        if not rod_types[id] then
+        if id == UNKNOWN_ROD_ID then
+            unknown = unknown + (tonumber(count) or 0)
+        elseif not rod_types[id] then
             unknown = unknown + (tonumber(count) or 0)
         end
     end
@@ -1510,7 +1515,9 @@ local function formatRodTypes(counts)
         end
     end
     for id, count in pairs(counts) do
-        if not rod_types[id] and (tonumber(count) or 0) > 0 then
+        if id == UNKNOWN_ROD_ID and (tonumber(count) or 0) > 0 then
+            hasUnknown = true
+        elseif not rod_types[id] and (tonumber(count) or 0) > 0 then
             hasUnknown = true
         end
     end
@@ -1574,97 +1581,6 @@ local function getFuelTypeLabel(proxy)
     return nil
 end
 
-local function extractCoordinates(value)
-    if type(value) ~= "table" then
-        return nil
-    end
-    local x = value.x or value[1]
-    local y = value.y or value[2]
-    local z = value.z or value[3]
-    if type(x) == "number" and type(y) == "number" and type(z) == "number" then
-        return {x = x, y = y, z = z}
-    end
-    return nil
-end
-
-local function getComponentCoordinates(proxy)
-    if not proxy then
-        return nil
-    end
-    local methods = {"getCoordinates", "getPosition", "getPos", "getLocation"}
-    for _, method in ipairs(methods) do
-        local coords = extractCoordinates(safeCall(proxy, method, nil))
-        if coords then
-            return coords
-        end
-    end
-    return nil
-end
-
-local function collectRbmkRodData()
-    local rodComponents = {"rbmk_fuel_rod", "rbmk_fuel_rod_reasim"}
-    local countsByReactor = {}
-    local totalByReactor = {}
-    local maxByReactor = {}
-    local reactorCoords = {}
-    local hasCoords = false
-    for i = 1, reactors do
-        countsByReactor[i] = {}
-        totalByReactor[i] = 0
-        maxByReactor[i] = 0
-        reactorCoords[i] = getComponentCoordinates(reactors_proxy[i])
-        if reactorCoords[i] then
-            hasCoords = true
-        end
-    end
-    local found = false
-    for _, ctype in ipairs(rodComponents) do
-        for address in component.list(ctype) do
-            found = true
-            local rproxy = component.proxy(address)
-            local rodId = extractRodId({
-                name = safeCall(rproxy, "getType", nil),
-                type = safeCall(rproxy, "getType", nil),
-                info = safeCall(rproxy, "getInfo", nil),
-                id = safeCall(rproxy, "getRodType", nil)
-            })
-            local idx = 1
-            if reactors > 1 and hasCoords then
-                local rc = getComponentCoordinates(rproxy)
-                if rc then
-                    local best = nil
-                    local bestDist = nil
-                    for i = 1, reactors do
-                        local c = reactorCoords[i]
-                        if c then
-                            local dx = c.x - rc.x
-                            local dy = c.y - rc.y
-                            local dz = c.z - rc.z
-                            local dist = dx * dx + dy * dy + dz * dz
-                            if not bestDist or dist < bestDist then
-                                bestDist = dist
-                                best = i
-                            end
-                        end
-                    end
-                    if best then
-                        idx = best
-                    end
-                end
-            end
-            if rodId then
-                countsByReactor[idx][rodId] = (countsByReactor[idx][rodId] or 0) + 1
-            end
-            totalByReactor[idx] = (totalByReactor[idx] or 0) + 1
-            maxByReactor[idx] = (maxByReactor[idx] or 0) + 1
-        end
-    end
-    if not found then
-        return nil
-    end
-    return countsByReactor, totalByReactor, maxByReactor
-end
-
 local function getReactorLevel(proxy)
     if not proxy then
         return 1
@@ -1691,29 +1607,49 @@ local function updateRodData(num)
         local counts = nil
         local maxCount = 0
         local totalCount = 0
-        local source = "none"
-        local rbmkCounts, rbmkTotal, rbmkMax = collectRbmkRodData()
-        if rbmkCounts and rbmkTotal and rbmkMax then
-            counts = rbmkCounts[i]
-            totalCount = rbmkTotal[i]
-            maxCount = rbmkMax[i]
-            source = "rbmk"
-        end
         if proxy then
             reactor_level[i] = getReactorLevel(proxy) or 1
-            if source == "none" then
-                counts, totalCount, maxCount = countRodsFromStatus(proxy)
-                source = "status"
+            counts, totalCount, maxCount = countRodsFromStatus(proxy)
+            local invCounts, invTotal, invMax = countRodsFromInventory(proxy)
+            if invCounts == nil or (invTotal or 0) == 0 then
+                local aidx = reactor_adapter_index[i]
+                if aidx and adapters_proxy[aidx] then
+                    invCounts, invTotal, invMax = countRodsFromInventoryAllSides(adapters_proxy[aidx])
+                end
+            end
+            if invCounts == nil or (invTotal or 0) == 0 then
+                if #adapters_proxy > 0 then
+                    local foundCounts = nil
+                    local foundTotal = 0
+                    local foundMax = 0
+                    local foundIndex = nil
+                    local foundCount = 0
+                    for aidx, aproxy in ipairs(adapters_proxy) do
+                        local c, t, m = countRodsFromInventoryAllSides(aproxy)
+                        if type(c) == "table" and (t or 0) > 0 then
+                            foundCount = foundCount + 1
+                            foundCounts = c
+                            foundTotal = t or 0
+                            foundMax = m or 0
+                            foundIndex = aidx
+                        end
+                    end
+                    if foundCount == 1 then
+                        reactor_adapter_index[i] = foundIndex
+                        invCounts, invTotal, invMax = foundCounts, foundTotal, foundMax
+                    end
+                end
+            end
+            if invCounts ~= nil and (invTotal or 0) > 0 then
+                counts, totalCount, maxCount = invCounts, invTotal, invMax
             end
             if counts == nil or (next(counts) == nil and (totalCount or 0) == 0) then
                 counts, totalCount, maxCount = countRodsFromInventory(proxy)
-                source = "inventory"
             end
             if counts == nil or (next(counts) == nil and (totalCount or 0) == 0) then
                 local aidx = reactor_adapter_index[i]
                 if aidx and adapters_proxy[aidx] then
                     counts, totalCount, maxCount = countRodsFromInventoryAllSides(adapters_proxy[aidx])
-                    source = "adapter"
                 end
             end
             if (counts == nil or (next(counts) == nil and (totalCount or 0) == 0)) and #adapters_proxy > 0 then
@@ -1735,12 +1671,11 @@ local function updateRodData(num)
                 if foundCount == 1 then
                     reactor_adapter_index[i] = foundIndex
                     counts, totalCount, maxCount = foundCounts, foundTotal, foundMax
-                    source = "adapter"
                 end
             end
         end
         local lvl = reactor_level[i] or 1
-        if source ~= "rbmk" and lvl > 1 and (totalCount or 0) > 0 then
+        if lvl > 1 and (totalCount or 0) > 0 then
             if type(counts) == "table" then
                 for id, c in pairs(counts) do
                     counts[id] = (tonumber(c) or 0) * lvl
@@ -1764,7 +1699,6 @@ local function updateRodData(num)
             reactor_rod_count[i] = totalCount
             reactor_rod_max[i] = maxCount
         end
-        reactor_rod_source[i] = source
     end
 end
 
@@ -3811,7 +3745,6 @@ local function mainLoop()
     reactor_rod_max = {}
     reactor_rod_types = {}
     reactor_level = {}
-    reactor_rod_source = {}
     reactor_rod_counts = {}
     reactor_rod_summary = {}
     
