@@ -46,8 +46,12 @@ if not fs.exists(configPath) then
         file:write("theme = false -- (false темная, true светлая)\n\n")
         file:write("updateCheck = true -- (false не проверять на наличие обновлений, true проверять обновления)\n\n")
         file:write("debugLog = false\n\n")
-        file:write("autoRods = false -- Автоматический режим со стержнями (заказ из МЭ)\n\n")
         file:write("isFirstStart = true\n\n")
+        file:write("-- Автопополнение стержней по реакторам (ключ = адрес реактора)\n")
+        file:write("rodAutoByAddr = {}\n\n")
+        file:write("-- Пресеты заказа стержней по реакторам (ключ = адрес реактора)\n")
+        file:write("-- Пример: rodPresetByAddr[\"<address>\"] = {id=\"modid:item\", qty=78}\n")
+        file:write("rodPresetByAddr = {}\n\n")
         file:write("-- После внесение изменений сохраните данные (Ctrl+S) и выйдите из редактора (Ctrl+W)\n")
         file:write("-- Если в будущем захотите поменять данные то пропишите \"cd data\" затем \"edit config.lua\"\n")
         file:close()
@@ -64,7 +68,10 @@ if not ok then
     return
 end
 
-if autoRods == nil then autoRods = false end
+if rodAutoByAddr == nil then rodAutoByAddr = {} end
+if rodPresetByAddr == nil then rodPresetByAddr = {} end
+
+local rodIdByType = {}
 
 local any_reactor_on = false
 local any_reactor_off = false
@@ -101,6 +108,10 @@ local reactor_rodCount = {}
 local reactor_rodExpected = {}
 local reactor_rodMultiplier = {}
 local reactor_rodLevel = {}
+
+-- forward declaration: start() uses it before the definition block below
+local updateReactorRodsState
+
 local last_me_address = nil
 local me_network = false
 local me_proxy = nil
@@ -392,8 +403,26 @@ local function saveCfg(param)
     file:write(string.format("theme = %s -- Тема интерфейса (false тёмная, true светлая)\n\n", tostring(theme)))
     file:write(string.format("updateCheck = %s -- (false не проверять на наличие обновлений, true проверять обновления)\n\n", tostring(updateCheck)))
     file:write(string.format("debugLog = %s\n\n", tostring(debugLog)))
-    file:write(string.format("autoRods = %s -- Автоматический режим со стержнями (заказ из МЭ)\n\n", tostring(autoRods)))
     file:write(string.format("isFirstStart = %s\n\n", tostring(isFirstStart)))
+
+    file:write("-- Автопополнение стержней по реакторам (ключ = адрес реактора)\n")
+    file:write("rodAutoByAddr = {\n")
+    for addr, v in pairs(rodAutoByAddr or {}) do
+        file:write(string.format("  [%q] = %s,\n", tostring(addr), tostring(v)))
+    end
+    file:write("}\n\n")
+
+    file:write("-- Пресеты заказа стержней по реакторам (ключ = адрес реактора)\n")
+    file:write("rodPresetByAddr = {\n")
+    for addr, p in pairs(rodPresetByAddr or {}) do
+        if type(p) == "table" then
+            local id = tostring(p.id or "")
+            local qty = tonumber(p.qty) or 0
+            file:write(string.format("  [%q] = {id=%q, qty=%d},\n", tostring(addr), id, math.floor(qty)))
+        end
+    end
+    file:write("}\n\n")
+
     file:write("-- После внесение изменений сохраните данные (Ctrl+S) и выйдите из редактора (Ctrl+W)\n")
     file:write("-- Для запуска основой программы перейдите в домашнюю директорию \"cd ..\", и напишите \"main.lua\"\n")
     
@@ -804,21 +833,32 @@ local function drawWidgets()
             if exp > 0 then
                 rodLabel = rodLabel .. " " .. tostring(cnt) .. "/" .. tostring(exp)
             end
-            if unicode.len(rodLabel) > 16 then
-                rodLabel = unicode.sub(rodLabel, 1, 13) .. "..."
+            local rodLine = "Стерж: " .. rodLabel
+            local maxLine = 17
+            if unicode.len(rodLine) > maxLine then
+                rodLine = unicode.sub(rodLine, 1, maxLine - 3) .. "..."
             end
-            buffer.drawText(x + 4,  y + 7,  colors.textclr, "Стерж: " .. rodLabel)
+            buffer.drawText(x + 4,  y + 7,  colors.textclr, rodLine)
 
-            -- Компактные кнопки друг под другом (по 1 строке)
-            buffer.drawRectangle(x + 2, y + 8, 18, 1, 0x38afff, 0, " ")
-            buffer.drawText(x + 2, y + 8, 0xffffff, shortenNameCentered("Заказать стержни", 18))
+            -- Кнопки (по 1 строке), с отдельным переключателем AUTO для каждого реактора
+            local btnX, btnW = x + 1, 19
+            local txtX, txtW = x + 2, 17
 
-            buffer.drawRectangle(x + 2, y + 9, 18, 1, 0xffd900, 0, " ")
-            buffer.drawText(x + 2, y + 9, 0x000000, shortenNameCentered("Проверить", 18))
+            buffer.drawRectangle(btnX, y + 8, btnW, 1, 0x38afff, 0, " ")
+            buffer.drawText(txtX, y + 8, 0xffffff, shortenNameCentered("Заказать стержни", txtW))
+
+            buffer.drawRectangle(btnX, y + 9, btnW, 1, 0xffd900, 0, " ")
+            buffer.drawText(txtX, y + 9, 0x000000, shortenNameCentered("Проверить", txtW))
 
             local btnColor = reactor_work[i] and 0xfd3232 or 0x2beb1a
-            buffer.drawRectangle(x + 2, y + 10, 18, 1, btnColor, 0, " ")
-            buffer.drawText(x + 2, y + 10, 0x000000, shortenNameCentered((reactor_work[i] and "Отключить" or "Включить"), 18))
+            buffer.drawRectangle(btnX, y + 10, 14, 1, btnColor, 0, " ")
+            buffer.drawText(txtX, y + 10, 0x000000, shortenNameCentered((reactor_work[i] and "Отключить" or "Включить"), 12))
+
+            local key = getReactorKey(i)
+            local autoOn = (rodAutoByAddr and rodAutoByAddr[key]) and true or false
+            local autoBg = autoOn and 0x2beb1a or 0x444444
+            buffer.drawRectangle(x + 16, y + 10, 4, 1, autoBg, 0, " ")
+            buffer.drawText(x + 16, y + 10, 0xffffff, "AUTO")
         else
             local x, y = widgetCoords[i][1], widgetCoords[i][2]
             buffer.drawRectangle(x + 1, y, 20, 11, colors.msgwarn, 0, " ")
@@ -1679,6 +1719,10 @@ local function normalizeRodType(idStr)
     return nil
 end
 
+local function getReactorKey(i)
+    return reactor_address[i] or tostring(i)
+end
+
 local function parseRodMultiplierFromText(s)
     s = tostring(s or ""):lower()
     if s == "" then return nil end
@@ -1852,6 +1896,13 @@ local function detectReactorRodInfo(reactorNum)
         reactor_rodCount[reactorNum] = present
         reactor_rodExpected[reactorNum] = expected
         reactor_rodMultiplier[reactorNum] = bestMult or 1
+
+        if rodType ~= "-" and rodType ~= "нет" and rodType ~= "разные" then
+            local id = tostring(bestType or "")
+            if id ~= "" and id:find(":") then
+                rodIdByType[rodType] = id
+            end
+        end
     end)
 
     if not ok then
@@ -1863,7 +1914,7 @@ local function detectReactorRodInfo(reactorNum)
     end
 end
 
-local function updateReactorRodsState(reactorNum)
+updateReactorRodsState = function(reactorNum)
     local proxy = reactors_proxy[reactorNum]
     if not proxy then
         reactor_missingRods[reactorNum] = false
@@ -2078,6 +2129,64 @@ local function meRequestCraft(filter, amount)
     local ok2, job = pcall(craftable.request, craftable, amount)
     if not ok2 or not job then
         return false
+    end
+
+    return true
+end
+
+local function orderRodsPresetForReactor(reactorNum, presetId, presetQty, savePreset, enableAuto)
+    if not me_network then
+        message("МЭ не найдена! Невозможно заказать стержни для Реактора #" .. reactorNum, colors.msgwarn, 34)
+        return false
+    end
+    if not me_proxy then
+        updateMeProxy()
+    end
+    if not me_proxy then
+        message("Нет прокси МЭ! Невозможно заказать стержни для Реактора #" .. reactorNum, colors.msgwarn, 34)
+        return false
+    end
+
+    detectReactorRodInfo(reactorNum)
+
+    local id = tostring(presetId or ""):match("^%s*(.-)%s*$")
+    if id == "" then
+        message("Не задан тип стержней для Реактора #" .. reactorNum, colors.msgwarn, 34)
+        return false
+    end
+
+    local desired = tonumber(presetQty) or 0
+    if desired <= 0 then
+        desired = tonumber(reactor_rodExpected[reactorNum]) or 0
+    end
+    local have = tonumber(reactor_rodCount[reactorNum]) or 0
+    local missing = desired - have
+    if missing <= 0 then
+        if savePreset then
+            local key = getReactorKey(reactorNum)
+            rodPresetByAddr[key] = { id = id, qty = math.floor(desired) }
+            if enableAuto ~= nil then
+                rodAutoByAddr[key] = enableAuto and true or false
+            end
+            saveCfg()
+        end
+        return true
+    end
+
+    local filter = (id:find(":") and { name = id } or { label = id })
+    local ok = meRequestCraft(filter, missing)
+    if not ok then
+        message("Ресурсов для создания стержней недостаточно для Реактора #" .. reactorNum, colors.msgwarn, 34)
+        return false
+    end
+
+    if savePreset then
+        local key = getReactorKey(reactorNum)
+        rodPresetByAddr[key] = { id = id, qty = math.floor(desired) }
+        if enableAuto ~= nil then
+            rodAutoByAddr[key] = enableAuto and true or false
+        end
+        saveCfg()
     end
 
     return true
@@ -2388,13 +2497,6 @@ local function drawSettingsMenu()
     local sw3_pipePos = (sw3_state and (sw3_w - 2) or 1)   -- позиция (1 - лево, sw3_w-2 - право)
     drawSwitch(sw3_x, sw3_y, sw3_w, sw3_pipePos, sw3_state, nil, 0x777777, nil, 0x444444)
 
-    buffer.drawText(modalX + 3, modalY + 15, 0x000000, "Авто-режим со стержнями")
-    animatedButton(1, modalX + 4, modalY + 16, "Включенно         ", nil, nil, 20, nil, nil, 0x444444, 0xffffff)
-    local sw4_x, sw4_y, sw4_w = modalX+16, modalY+17, 7
-    local sw4_state = autoRods -- текущее состояние
-    local sw4_pipePos = (sw4_state and (sw4_w - 2) or 1)
-    drawSwitch(sw4_x, sw4_y, sw4_w, sw4_pipePos, sw4_state, nil, 0x777777, nil, 0x444444)
-
     -- nickname widget
     local function drawNicknameWidget(placeholder, clr)
         if placeholder == nil then
@@ -2476,7 +2578,6 @@ local function drawSettingsMenu()
     local NSTheme = theme
     local NSUpdateCheck = updateCheck
     local NSDebugLog = debugLog
-    local NSAutoRods = autoRods
     local NSusers = {}
     for _, u in ipairs(users) do
         table.insert(NSusers, u)
@@ -2543,7 +2644,6 @@ local function drawSettingsMenu()
                 theme = NSTheme
                 updateCheck = NSUpdateCheck
                 debugLog = NSDebugLog
-                autoRods = NSAutoRods
                 users = NSusers
                 saveCfg()
                 break
@@ -2594,16 +2694,6 @@ local function drawSettingsMenu()
                 
                 -- Тут можно добавить действие при переключении
                 -- example: debug_log = sw_state
-            elseif x >= sw4_x and x <= sw4_x + sw4_w - 1 and y == sw4_y then
-                sw4_state = not sw4_state
-                local targetPos = sw4_state and (sw4_w - 2) or 1
-                local step = (targetPos > sw4_pipePos) and 1 or -1
-                repeat
-                    sw4_pipePos = sw4_pipePos + step
-                    drawSwitch(sw4_x, sw4_y, sw4_w, sw4_pipePos, sw4_state, nil, 0x777777, nil, 0x444444)
-                    buffer.drawChanges()
-                    os.sleep(0.02)
-                until sw4_pipePos == targetPos
             elseif y >= modalY + 19 and y <= modalY + 21 and x >= modalX + 55 and x <= modalX + 56+5 then
                 -- Добавляем никнейм в белый список
                 animatedButton(1, modalX + 56, modalY + 19, "ADD", nil, nil, 5, nil, nil, 0x21ff21, 0xffffff) -- 0x21ff21
@@ -2648,7 +2738,6 @@ local function drawSettingsMenu()
                 theme = sw1_state
                 updateCheck = sw2_state
                 debugLog = sw3_state
-                autoRods = sw4_state
                 saveCfg()
                 
                 switchTheme()
@@ -2685,6 +2774,218 @@ local function drawSettingsMenu()
                         local c = string.char(char)
                         f.text = f.text:sub(1, f.cursorPos - 1) .. c .. f.text:sub(f.cursorPos)
                         f.cursorPos = f.cursorPos + 1
+                    elseif code == 28 then -- Enter
+                        f.active = false
+                        f.cursorVisible = false
+                    end
+                end
+            end
+            drawAllFields()
+        end
+    end
+end
+
+-- -----------------------------{RODS ORDER MENU}----------------------------------
+local function drawRodsOrderMenu(reactorNum)
+    detectReactorRodInfo(reactorNum)
+
+    local key = getReactorKey(reactorNum)
+    local preset = (rodPresetByAddr and rodPresetByAddr[key]) or {}
+    local autoOn = (rodAutoByAddr and rodAutoByAddr[key]) and true or false
+
+    local curId = tostring(preset.id or ""):match("^%s*(.-)%s*$")
+    if curId == "" then
+        -- попробуем подобрать ID по уже распознанному типу
+        local t = tostring(reactor_rodType[reactorNum] or "")
+        if rodIdByType and rodIdByType[t] then
+            curId = rodIdByType[t]
+        end
+    end
+
+    local curQty = tonumber(preset.qty) or (tonumber(reactor_rodExpected[reactorNum]) or 0)
+    if curQty < 0 then curQty = 0 end
+
+    local remember = (preset.id ~= nil and tostring(preset.id) ~= "")
+
+    local modalX, modalY, modalW, modalH = 30, 8, 80, 22
+    local old = buffer.copy(1, 1, 160, 50)
+    buffer.drawRectangle(1, 1, 160, 50, 0x000000, 0, " ", 0.4)
+    buffer.drawRectangle(modalX, modalY, modalW, modalH, 0xcccccc, 0, " ")
+    buffer.drawRectangle(modalX-1, modalY+1, modalW+2, modalH-2, 0xcccccc, 0, " ")
+    local cornerPos = {
+        {modalX-1, modalY, 1}, {modalX+modalW, modalY, 2},
+        {modalX+modalW, modalY+modalH-1, 3}, {modalX-1, modalY+modalH-1, 4}
+    }
+    for _, c in ipairs(cornerPos) do
+        buffer.drawText(c[1], c[2], 0xcccccc, brailleChar(brail_status[c[3]]))
+    end
+
+    removeAllFields()
+
+    buffer.drawText(modalX + 3, modalY + 1, 0x000000, "Реактор #" .. reactorNum .. " — Заказ стержней")
+    buffer.drawText(modalX + 3, modalY + 3, 0x000000, "ID стержня (modid:item) или label:")
+    createSearchField(modalX + 3, modalY + 5, 40, "например: modid:item")
+    searchFields[1].text = curId
+    searchFields[1].cursorPos = unicode.len(searchFields[1].text) + 1
+
+    buffer.drawText(modalX + 3, modalY + 7, 0x000000, "Количество (всего, с учётом уровня):")
+    createSearchField(modalX + 3, modalY + 9, 14, "например: 78")
+    searchFields[2].text = tostring(curQty)
+    searchFields[2].cursorPos = unicode.len(searchFields[2].text) + 1
+
+    local cnt = tonumber(reactor_rodCount[reactorNum]) or 0
+    local exp = tonumber(reactor_rodExpected[reactorNum]) or 0
+    local lvl = tonumber(reactor_rodLevel[reactorNum]) or 1
+    buffer.drawText(modalX + 50, modalY + 5, 0x000000, "Текущее: " .. tostring(cnt) .. "/" .. tostring(exp))
+    buffer.drawText(modalX + 50, modalY + 6, 0x000000, "Уровень: " .. tostring(lvl))
+
+    local function drawCheck(x, y, label, state)
+        local bg = state and 0x2beb1a or 0x444444
+        buffer.drawRectangle(x, y, 4, 1, bg, 0, " ")
+        buffer.drawText(x, y, 0xffffff, state and "[x]" or "[ ]")
+        buffer.drawText(x + 5, y, 0x000000, label)
+    end
+
+    local rememberX, rememberY = modalX + 3, modalY + 12
+    local autoX, autoY = modalX + 3, modalY + 14
+    drawCheck(rememberX, rememberY, "Запомнить выбор", remember)
+    drawCheck(autoX, autoY, "Автопополнение для этого реактора", autoOn)
+
+    buffer.drawText(modalX + 3, modalY + 16, 0x000000, "Быстрый выбор типа (если ID уже был найден):")
+    local function drawTypeBtn(x, y, text, color)
+        buffer.drawRectangle(x, y, 14, 1, color, 0, " ")
+        buffer.drawText(x, y, 0xffffff, shortenNameCentered(text, 14))
+    end
+    local b1x, b2x, b3x, b4x = modalX + 3, modalX + 18, modalX + 33, modalX + 48
+    local by = modalY + 18
+    drawTypeBtn(b1x, by, "Уран", 0x38afff)
+    drawTypeBtn(b2x, by, "MOX", 0x38afff)
+    drawTypeBtn(b3x, by, "Калиф.", 0x38afff)
+    drawTypeBtn(b4x, by, "Ксирд.", 0x38afff)
+
+    local btnY = modalY + modalH - 3
+    local btnOrderX, btnSaveX, btnCloseX = modalX + 3, modalX + 23, modalX + 43
+    buffer.drawRectangle(btnOrderX, btnY, 18, 1, 0x2f8cff, 0, " ")
+    buffer.drawText(btnOrderX, btnY, 0xffffff, shortenNameCentered("Заказать", 18))
+    buffer.drawRectangle(btnSaveX, btnY, 18, 1, 0x8100cc, 0, " ")
+    buffer.drawText(btnSaveX, btnY, 0xffffff, shortenNameCentered("Сохранить", 18))
+    buffer.drawRectangle(btnCloseX, btnY, 18, 1, 0x444444, 0, " ")
+    buffer.drawText(btnCloseX, btnY, 0xffffff, shortenNameCentered("Закрыть", 18))
+
+    buffer.drawText(modalX + 3, modalY + modalH - 1, 0x666666, "Клик вне окна — закрыть без сохранения")
+    buffer.drawChanges()
+
+    while true do
+        local eventData = {event.pull(0.05)}
+        local eventType = eventData[1]
+
+        for _, f in ipairs(searchFields) do
+            if f.active and computer.uptime() - f.lastBlink >= 0.5 then
+                f.cursorVisible = not f.cursorVisible
+                f.lastBlink = computer.uptime()
+                drawAllFields()
+            end
+        end
+
+        if eventType == "touch" then
+            local _, _, x, y, button, uuid = table.unpack(eventData)
+
+            if x < modalX-1 or x > modalX + modalW or y < modalY or y > (modalY-1) + modalH then
+                buffer.paste(1, 1, old)
+                buffer.drawChanges()
+                break
+            end
+
+            for i, f in ipairs(searchFields) do
+                if y == f.y and x >= f.x and x <= f.x + f.width - 1 then
+                    for _, f2 in ipairs(searchFields) do
+                        f2.active, f2.cursorVisible = false, false
+                    end
+                    f.active = true
+                    f.cursorVisible = true
+                    f.lastBlink = computer.uptime()
+                else
+                    if f.active then
+                        f.active = false
+                        f.cursorVisible = false
+                    end
+                end
+            end
+            drawAllFields()
+
+            if y == rememberY and x >= rememberX and x <= rememberX + 3 then
+                remember = not remember
+                drawCheck(rememberX, rememberY, "Запомнить выбор", remember)
+                buffer.drawChanges()
+            elseif y == autoY and x >= autoX and x <= autoX + 3 then
+                autoOn = not autoOn
+                drawCheck(autoX, autoY, "Автопополнение для этого реактора", autoOn)
+                buffer.drawChanges()
+            elseif y == by then
+                local function pick(t)
+                    if rodIdByType and rodIdByType[t] then
+                        searchFields[1].text = rodIdByType[t]
+                        searchFields[1].cursorPos = unicode.len(searchFields[1].text) + 1
+                        drawAllFields()
+                    end
+                end
+                if x >= b1x and x < b1x + 14 then pick("Уран")
+                elseif x >= b2x and x < b2x + 14 then pick("MOX")
+                elseif x >= b3x and x < b3x + 14 then pick("Калифорний")
+                elseif x >= b4x and x < b4x + 14 then pick("Ксирдалий-Визамиумное")
+                end
+            elseif y == btnY then
+                local id = searchFields[1].text
+                local qty = tonumber(searchFields[2].text) or 0
+                if x >= btnOrderX and x < btnOrderX + 18 then
+                    orderRodsPresetForReactor(reactorNum, id, qty, remember, autoOn)
+                    buffer.paste(1, 1, old)
+                    buffer.drawChanges()
+                    drawWidgets()
+                    break
+                elseif x >= btnSaveX and x < btnSaveX + 18 then
+                    local k = getReactorKey(reactorNum)
+                    if remember then
+                        rodPresetByAddr[k] = { id = tostring(id or ""), qty = math.floor(tonumber(qty) or 0) }
+                    else
+                        rodPresetByAddr[k] = nil
+                    end
+                    rodAutoByAddr[k] = autoOn and true or false
+                    saveCfg()
+                    buffer.paste(1, 1, old)
+                    buffer.drawChanges()
+                    drawWidgets()
+                    break
+                elseif x >= btnCloseX and x < btnCloseX + 18 then
+                    buffer.paste(1, 1, old)
+                    buffer.drawChanges()
+                    break
+                end
+            end
+        elseif eventType == "key_down" then
+            local _, _, char, code = table.unpack(eventData)
+            for i, f in ipairs(searchFields) do
+                if f.active then
+                    if code == 14 then -- Backspace
+                        if f.cursorPos > 1 then
+                            f.text = f.text:sub(1, f.cursorPos - 2) .. f.text:sub(f.cursorPos)
+                            f.cursorPos = f.cursorPos - 1
+                        end
+                    elseif code == 203 then -- left
+                        if f.cursorPos > 1 then f.cursorPos = f.cursorPos - 1 end
+                    elseif code == 205 then -- right
+                        if f.cursorPos <= #f.text then f.cursorPos = f.cursorPos + 1 end
+                    elseif char >= 32 and char <= 126 then
+                        local c = string.char(char)
+                        if i == 2 then
+                            if c:match("%d") then
+                                f.text = f.text:sub(1, f.cursorPos - 1) .. c .. f.text:sub(f.cursorPos)
+                                f.cursorPos = f.cursorPos + 1
+                            end
+                        else
+                            f.text = f.text:sub(1, f.cursorPos - 1) .. c .. f.text:sub(f.cursorPos)
+                            f.cursorPos = f.cursorPos + 1
+                        end
                     elseif code == 28 then -- Enter
                         f.active = false
                         f.cursorVisible = false
@@ -3565,9 +3866,9 @@ local function handleTouch(x, y, uuid)
     for i = 1, reactors do
         if reactor_aborted[i] == false then
             local xw, yw = widgetCoords[i][1], widgetCoords[i][2]
-            if x >= (xw + 2) and x <= (xw + 19) then
+            if x >= (xw + 1) and x <= (xw + 19) then
                 if y == (yw + 8) then
-                    orderRodsForReactor(i)
+                    drawRodsOrderMenu(i)
                     os.sleep(0.15)
                     drawWidgets()
                     break
@@ -3577,26 +3878,36 @@ local function handleTouch(x, y, uuid)
                     drawWidgets()
                     break
                 elseif y == (yw + 10) then
-                    local Rnum = i
-                    drawStatus(Rnum)
-                    if reactor_work[Rnum] then
-                        stop(Rnum)
-                        updateReactorData(Rnum)
-                    else
-                        local okStart, errStart = pcall(start, Rnum)
-                        if not okStart then
-                            message("Ошибка запуска Реактора #" .. Rnum .. ": " .. tostring(errStart), colors.msgwarn, 34)
+                    -- Вкл/Выкл
+                    if x <= (xw + 14) then
+                        local Rnum = i
+                        drawStatus(Rnum)
+                        if reactor_work[Rnum] then
+                            stop(Rnum)
+                            updateReactorData(Rnum)
+                        else
+                            local okStart, errStart = pcall(start, Rnum)
+                            if not okStart then
+                                message("Ошибка запуска Реактора #" .. Rnum .. ": " .. tostring(errStart), colors.msgwarn, 34)
+                            end
+                            starting = true
+                            updateReactorData(Rnum)
                         end
-                        starting = true
-                        updateReactorData(Rnum)
+                        if not any_reactor_on then
+                            work = false
+                            starting = false
+                        end
+                        os.sleep(0.15)
+                        drawWidgets()
+                        break
+                    else
+                        -- AUTO toggle
+                        local key = getReactorKey(i)
+                        rodAutoByAddr[key] = not (rodAutoByAddr and rodAutoByAddr[key])
+                        saveCfg()
+                        drawWidgets()
+                        break
                     end
-                    if not any_reactor_on then
-                        work = false
-                        starting = false
-                    end
-                    os.sleep(0.15)
-                    drawWidgets()
-                    break
                 end
             end
         end
@@ -3751,10 +4062,19 @@ local function mainLoop()
                 end
             end
 
-            if autoRods and me_network and second % 60 == 0 then
+            if me_network and second % 60 == 0 then
                 for i = 1, reactors do
                     if reactor_aborted[i] == false then
-                        orderRodsForReactor(i)
+                        local key = getReactorKey(i)
+                        if rodAutoByAddr and rodAutoByAddr[key] then
+                            updateReactorRodsState(i)
+                            if reactor_missingRods[i] then
+                                local preset = rodPresetByAddr and rodPresetByAddr[key] or nil
+                                if type(preset) == "table" and tostring(preset.id or "") ~= "" then
+                                    orderRodsPresetForReactor(i, preset.id, preset.qty, false, nil)
+                                end
+                            end
+                        end
                     end
                 end
             end
