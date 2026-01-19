@@ -34,6 +34,13 @@ end
 if not fs.exists(dataFolder) then
     fs.makeDirectory(dataFolder)
 end
+-- Инициализация переменных конфига
+local users = {}
+local usersold = {}
+local theme = false
+local debugLog = false
+local isFirstStart = true
+
 if not fs.exists(configPath) then
     local file = io.open(configPath, "w")
     if file then
@@ -434,6 +441,8 @@ local function initReactors()
         temperature[i] = 0
         reactor_aborted[i] = false
         reactor_depletionTime[i] = 0
+        reactor_work[i] = false
+        reactor_type[i] = "Air"
     end
 end
 
@@ -2834,6 +2843,9 @@ local function mainLoop()
     minute = 0
     hour = 0
     last_me_address = nil
+    MeSecond = 0
+    work = false
+    starting = false
     
     
     switchTheme(theme)
@@ -2843,8 +2855,9 @@ local function mainLoop()
     initChatBox()
     silentstop()
     
+    consoleLines = {}
     for i = 1, (flux_network and 19 or 21) do
-        consoleLines[i] = ""
+        consoleLines[i] = {text = "", textBase = "", color = colors.textclr, count = 0}
     end 
     last_me_address = addr
     drawStatic()
