@@ -1305,17 +1305,16 @@ local function drawTimeInfo()
     for i = 0, 35 - 1 do
         buffer.drawText(123 + i, fl_y1+1, colors.bg2, brailleChar(brail_console[2]))
     end
-    buffer.drawText(124, fl_y1, colors.textclr, "МЭ: Обн. ч/з..")
-    buffer.drawText(141, fl_y1, colors.textclr, "Время работы:")
+    buffer.drawText(124, fl_y1, colors.textclr, "Время работы:")
     buffer.drawText(139, fl_y1, colors.bg2, brailleChar(brail_cherta[1]))
     buffer.drawText(139, fl_y1+1, colors.bg2, brailleChar(brail_cherta[2]))
     buffer.drawText(139, fl_y1+2, colors.bg2, brailleChar(brail_cherta[1]))
     buffer.drawText(139, fl_y1+3, colors.bg2, brailleChar(brail_cherta[1]))
     drawDigit(125, fl_y1+2, brail_time, 0xaa4b2e)
     -- ---------------------------------------------------------------------------
-    buffer.drawRectangle(127, fl_y1+2, 12, 2, colors.bg, 0, " ")
-    
-    drawNumberWithText(134, fl_y1+2, (me_network and (60 - MeSecond) or 0), 2, colors.textclr, "Sec", colors.textclr)
+    buffer.drawRectangle(118, fl_y1+2, 21, 2, colors.bg, 0, " ")
+
+    drawNumberWithText(125, fl_y1+2, (me_network and (60 - MeSecond) or 0), 2, colors.textclr, "Sec", colors.textclr)
     
     buffer.drawRectangle(140, fl_y1+2, 18, 2, colors.bg, 0, " ")
 
@@ -1916,8 +1915,18 @@ local function detectReactorRodInfo(reactorNum)
         reactor_rodLevel[reactorNum] = bestLevel
 
         local slotCount = math.max(bestLevel * 3, #rods)
-        local present = slotCount * bestLevel
+        local present = 0
         local expected = slotCount * bestLevel
+
+        -- Подсчитываем реальное количество стержней
+        for _, rod in ipairs(rods) do
+            if type(rod) == "table" then
+                local id = extractRodIdentity(rod)
+                if id then
+                    present = present + bestLevel
+                end
+            end
+        end
 
         local bestType, bestTypeCount = nil, 0
         local distinctTypes = 0
@@ -2846,6 +2855,21 @@ local function drawSettingsMenu()
 end
 
 -- -----------------------------{RODS ORDER MENU}----------------------------------
+local function showInputDialog(prompt, default)
+    term.setCursor(1, 1)
+    term.clear()
+    print(prompt)
+    if default and default ~= "" then
+        print("Текущее: " .. default)
+    end
+    print("Оставьте пустым для сброса к умолчанию")
+    io.write("> ")
+    local input = io.read()
+    term.clear()
+    term.setCursor(1, 1)
+    return input
+end
+
 local function drawRodsOrderMenu(reactorNum)
     detectReactorRodInfo(reactorNum)
 
@@ -2897,7 +2921,7 @@ local function drawRodsOrderMenu(reactorNum)
         end
     end
 
-    local modalX, modalY, modalW, modalH = 38, 10, 64, 14
+    local modalX, modalY, modalW, modalH = 38, 8, 64, 18
     local old = buffer.copy(1, 1, 160, 50)
     buffer.drawRectangle(1, 1, 160, 50, 0x000000, 0, " ", 0.4)
     buffer.drawRectangle(modalX, modalY, modalW, modalH, 0xcccccc, 0, " ")
@@ -2930,7 +2954,7 @@ local function drawRodsOrderMenu(reactorNum)
         buffer.drawText(x + 5, y, 0x000000, label)
     end
 
-    local rememberX, rememberY = modalX + 3, modalY + 4
+    local rememberX, rememberY = modalX + 3, modalY + 14
     drawCheck(rememberX, rememberY, "Запомнить выбор", remember)
 
     -- Кратность
@@ -2950,8 +2974,8 @@ local function drawRodsOrderMenu(reactorNum)
     end
 
     -- Тип
-    local typesLabelY = modalY + 9
-    local typesY = modalY + 10
+    local typesLabelY = modalY + 11
+    local typesY = modalY + 12
     local t1x, t2x, t3x, t4x = modalX + 3, modalX + 18, modalX + 33, modalX + 48
     local function drawTypeButtons()
         buffer.drawText(modalX + 3, typesLabelY, 0x000000, "Тип:")
@@ -2972,11 +2996,11 @@ local function drawRodsOrderMenu(reactorNum)
     drawTypeButtons()
 
     local btnY = modalY + modalH - 2
-    local btnOrderX, btnCloseX = modalX + 3, modalX + 23
-    buffer.drawRectangle(btnOrderX, btnY, 18, 1, 0x2f8cff, 0, " ")
-    buffer.drawText(btnOrderX, btnY, 0xffffff, shortenNameCentered("Заказать", 18))
-    buffer.drawRectangle(btnCloseX, btnY, 18, 1, 0x444444, 0, " ")
-    buffer.drawText(btnCloseX, btnY, 0xffffff, shortenNameCentered("Закрыть", 18))
+    local btnOrderX, btnCloseX = modalX + 3, modalX + 25
+    buffer.drawRectangle(btnOrderX, btnY, 16, 1, 0x2f8cff, 0, " ")
+    buffer.drawText(btnOrderX, btnY, 0xffffff, shortenNameCentered("Заказать", 16))
+    buffer.drawRectangle(btnCloseX, btnY, 16, 1, 0x444444, 0, " ")
+    buffer.drawText(btnCloseX, btnY, 0xffffff, shortenNameCentered("Закрыть", 16))
 
     buffer.drawText(modalX + 3, modalY + modalH - 1, 0x666666, "Клик вне окна — закрыть")
     buffer.drawChanges()
@@ -3009,7 +3033,7 @@ local function drawRodsOrderMenu(reactorNum)
                 drawCheck(rememberX, rememberY, "Запомнить выбор", remember)
                 buffer.drawChanges()
             elseif y == btnY then
-                if x >= btnOrderX and x < btnOrderX + 18 then
+                if x >= btnOrderX and x < btnOrderX + 16 then
                     local id = currentSelectedId()
                     if not id then
                         message("Для выбранного типа/кратности нет ID стержня в списке.", colors.msgwarn, 34)
@@ -3021,7 +3045,7 @@ local function drawRodsOrderMenu(reactorNum)
                     buffer.drawChanges()
                     drawWidgets()
                     break
-                elseif x >= btnCloseX and x < btnCloseX + 18 then
+                elseif x >= btnCloseX and x < btnCloseX + 16 then
                     buffer.paste(1, 1, old)
                     buffer.drawChanges()
                     break
