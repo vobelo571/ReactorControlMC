@@ -72,6 +72,43 @@ if type(rodAutoByAddr) ~= "table" then rodAutoByAddr = {} end
 if type(rodPresetByAddr) ~= "table" then rodPresetByAddr = {} end
 
 local rodIdByType = {}
+local rodCatalog = {
+    -- x16
+    { type = "Уран", mult = 16, id = "htc_reactors:sixteen_uranium_fuel_rod" },
+    { type = "MOX", mult = 16, id = "htc_reactors:sixteen_mox_fuel_rod" },
+    -- x4
+    { type = "Уран", mult = 4, id = "htc_reactors:quad_uranium_fuel_rod" },
+    { type = "MOX", mult = 4, id = "htc_reactors:quad_mox_fuel_rod" },
+    { type = "Калифорний", mult = 4, id = "htc_reactors:quad_californium_fuel_rod" },
+    { type = "Ксирдалий-Визамиумное", mult = 4, id = "htc_reactors:quad_ksirviz_fuel_rod" }
+}
+
+local rodIdByTypeMult = {}
+local function buildRodCatalogMaps()
+    rodIdByTypeMult = {}
+    for _, r in ipairs(rodCatalog) do
+        if r and r.type and r.mult and r.id then
+            rodIdByTypeMult[r.type] = rodIdByTypeMult[r.type] or {}
+            rodIdByTypeMult[r.type][tonumber(r.mult) or r.mult] = tostring(r.id)
+        end
+    end
+end
+buildRodCatalogMaps()
+
+local function getRodIdByTypeAndMult(t, mult)
+    t = tostring(t or "")
+    mult = tonumber(mult) or 1
+    if rodIdByTypeMult[t] and rodIdByTypeMult[t][mult] then
+        return rodIdByTypeMult[t][mult]
+    end
+    -- fallback: если нет нужной кратности, попробуем любую доступную
+    if rodIdByTypeMult[t] then
+        for _, id in pairs(rodIdByTypeMult[t]) do
+            return id
+        end
+    end
+    return nil
+end
 
 local any_reactor_on = false
 local any_reactor_off = false
@@ -1723,7 +1760,7 @@ local function normalizeRodType(idStr)
     if s:find("mox") then return "MOX" end
     if s:find("calif") or s:find("califor") then return "Калифорний" end
     if s:find("uran") or s:find("u%-?238") or s:find("u%-?235") then return "Уран" end
-    if s:find("xir") or s:find("xird") or s:find("vizam") or s:find("wizam") then
+    if s:find("ksir") or s:find("ksirviz") or s:find("xir") or s:find("xird") or s:find("vizam") or s:find("wizam") then
         return "Ксирдалий-Визамиумное"
     end
 
@@ -2162,8 +2199,16 @@ local function orderRodsPresetForReactor(reactorNum, presetId, presetQty, savePr
 
     local id = tostring(presetId or ""):match("^%s*(.-)%s*$")
     if id == "" then
-        message("Не задан тип стержней для Реактора #" .. reactorNum, colors.msgwarn, 34)
-        return false
+        -- попробуем подобрать по распознанному типу/кратности
+        local t = tostring(reactor_rodType[reactorNum] or "")
+        local mult = tonumber(reactor_rodMultiplier[reactorNum]) or 1
+        local inferred = getRodIdByTypeAndMult(t, mult)
+        if inferred then
+            id = inferred
+        else
+            message("Не задан тип стержней для Реактора #" .. reactorNum, colors.msgwarn, 34)
+            return false
+        end
     end
 
     local desired = tonumber(presetQty) or 0
@@ -2806,10 +2851,12 @@ local function drawRodsOrderMenu(reactorNum)
 
     local curId = tostring(preset.id or ""):match("^%s*(.-)%s*$")
     if curId == "" then
-        -- попробуем подобрать ID по уже распознанному типу
+        -- подберём ID по распознанному типу/кратности из каталога
         local t = tostring(reactor_rodType[reactorNum] or "")
-        if rodIdByType and rodIdByType[t] then
-            curId = rodIdByType[t]
+        local mult = tonumber(reactor_rodMultiplier[reactorNum]) or 1
+        local inferred = getRodIdByTypeAndMult(t, mult)
+        if inferred then
+            curId = inferred
         end
     end
 
@@ -2862,17 +2909,33 @@ local function drawRodsOrderMenu(reactorNum)
     drawCheck(rememberX, rememberY, "Запомнить выбор", remember)
     drawCheck(autoX, autoY, "Автопополнение для этого реактора", autoOn)
 
-    buffer.drawText(modalX + 3, modalY + 16, 0x000000, "Быстрый выбор типа (если ID уже был найден):")
+    buffer.drawText(modalX + 3, modalY + 16, 0x000000, "Быстрый выбор (из списка доступных стержней):")
     local function drawTypeBtn(x, y, text, color)
         buffer.drawRectangle(x, y, 14, 1, color, 0, " ")
         buffer.drawText(x, y, 0xffffff, shortenNameCentered(text, 14))
     end
     local b1x, b2x, b3x, b4x = modalX + 3, modalX + 18, modalX + 33, modalX + 48
-    local by = modalY + 18
-    drawTypeBtn(b1x, by, "Уран", 0x38afff)
-    drawTypeBtn(b2x, by, "MOX", 0x38afff)
-    drawTypeBtn(b3x, by, "Калиф.", 0x38afff)
-    drawTypeBtn(b4x, by, "Ксирд.", 0x38afff)
+    local by16 = modalY + 18
+    local by4 = modalY + 19
+
+    local function drawPickRow(mult, y)
+        local colorOn = 0x38afff
+        local colorOff = 0x666666
+        buffer.drawText(modalX + 63, y, 0x000000, "x" .. tostring(mult))
+
+        local function btn(x, txt, rodType)
+            local id = getRodIdByTypeAndMult(rodType, mult)
+            drawTypeBtn(x, y, txt, id and colorOn or colorOff)
+        end
+
+        btn(b1x, "Уран", "Уран")
+        btn(b2x, "MOX", "MOX")
+        btn(b3x, "Калиф.", "Калифорний")
+        btn(b4x, "Ксирд.", "Ксирдалий-Визамиумное")
+    end
+
+    drawPickRow(16, by16)
+    drawPickRow(4, by4)
 
     local btnY = modalY + modalH - 3
     local btnOrderX, btnSaveX, btnCloseX = modalX + 3, modalX + 23, modalX + 43
@@ -2932,10 +2995,12 @@ local function drawRodsOrderMenu(reactorNum)
                 autoOn = not autoOn
                 drawCheck(autoX, autoY, "Автопополнение для этого реактора", autoOn)
                 buffer.drawChanges()
-            elseif y == by then
-                local function pick(t)
-                    if rodIdByType and rodIdByType[t] then
-                        searchFields[1].text = rodIdByType[t]
+            elseif y == by16 or y == by4 then
+                local mult = (y == by16) and 16 or 4
+                local function pick(rodType)
+                    local id = getRodIdByTypeAndMult(rodType, mult)
+                    if id then
+                        searchFields[1].text = id
                         searchFields[1].cursorPos = unicode.len(searchFields[1].text) + 1
                         drawAllFields()
                     end
