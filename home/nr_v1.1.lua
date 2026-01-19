@@ -1,6 +1,20 @@
 -- Reactor Control v1.1 build 3
 
 -- ----------------------------------------------------------------------------------------------------
+-- Ранний boot-log (нужен, чтобы ловить падения ДО mainLoop)
+local function __bootLog(msg)
+    local ok = pcall(function()
+        local f = io.open("/home/rc_boot.log", "a")
+        if f then
+            f:write(tostring(msg) .. "\n")
+            f:close()
+        end
+    end)
+    return ok
+end
+
+__bootLog("BOOT: start")
+
 local computer = require("computer")
 local image = require("image")
 local buffer = require("doubleBuffering")
@@ -13,8 +27,26 @@ local unicode = require("unicode")
 local bit = require("bit32")
 -- ----------------------------------------------------------------------------------------------------
 
-buffer.setResolution(160, 50)
-buffer.clear(0x000000)
+__bootLog("BOOT: requires ok")
+
+-- Безопасная установка разрешения: если железо не тянет 160x50, не падаем в shell.
+local function safeSetResolution(w, h)
+    local gpu = component and component.gpu
+    if gpu and gpu.maxResolution then
+        local maxW, maxH = gpu.maxResolution()
+        if type(maxW) == "number" and type(maxH) == "number" then
+            w = math.min(w, maxW)
+            h = math.min(h, maxH)
+        end
+        pcall(gpu.setResolution, w, h)
+    end
+    pcall(buffer.setResolution, w, h)
+    pcall(buffer.clear, 0x000000)
+    return w, h
+end
+
+safeSetResolution(160, 50)
+__bootLog("BOOT: resolution set")
 
 local lastTime = computer.uptime()
 local exit = false
