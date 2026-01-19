@@ -1271,7 +1271,15 @@ local function checkReactorStatus(num)
     any_reactor_off = false
 
     for i = num or 1, num or reactors do
-        local status = safeCall(reactors_proxy[i], "hasWork", false)
+        -- Попробуем разные методы для проверки работы реактора
+        local status = safeCall(reactors_proxy[i], "hasWork", nil)
+        if status == nil then
+            status = safeCall(reactors_proxy[i], "isActive", nil)
+        end
+        if status == nil then
+            status = safeCall(reactors_proxy[i], "getActive", nil)
+        end
+        status = status or false
         if status == true then
             reactor_work[i] = true
             any_reactor_on = true
@@ -1603,7 +1611,15 @@ local function updateReactorData(num)
         temperature[i]      = safeCall(proxy, "getTemperature", 0)
         reactor_type[i]     = safeCall(proxy, "isActiveCooling", false) and "Fluid" or "Air"
         reactor_rf[i]       = safeCall(proxy, "getEnergyGeneration", 0)
-        reactor_work[i]     = safeCall(proxy, "hasWork", false)
+        -- Попробуем разные методы для проверки работы реактора
+        local workStatus = safeCall(proxy, "hasWork", nil)
+        if workStatus == nil then
+            workStatus = safeCall(proxy, "isActive", nil)
+        end
+        if workStatus == nil then
+            workStatus = safeCall(proxy, "getActive", nil)
+        end
+        reactor_work[i] = workStatus or false
     end
     drawWidgets()
     drawRFinfo()
@@ -1847,7 +1863,104 @@ local function detectReactorRodInfo(reactorNum)
             return
         end
 
+        -- Отладка: проверим доступные методы
+        if debugLog then
+            local methods = {}
+            for k, v in pairs(proxy) do
+                if type(v) == "function" then
+                    table.insert(methods, k)
+                end
+            end
+            logError("Available methods for reactor #" .. reactorNum .. ": " .. table.concat(methods, ", "))
+        end
+
+        -- Проверим, что proxy все еще валиден
+        if not proxy or not pcall(function() return proxy.address end) then
+            if debugLog then
+                logError("Proxy for reactor #" .. reactorNum .. " is invalid, trying to reinitialize")
+            end
+            -- Попробуем переинициализировать proxy
+            local addr = reactor_address[reactorNum]
+            if addr then
+                local ok, newProxy = pcall(component.proxy, addr)
+                if ok and newProxy then
+                    reactors_proxy[reactorNum] = newProxy
+                    proxy = newProxy
+                    if debugLog then
+                        logError("Successfully reinitialized proxy for reactor #" .. reactorNum)
+                    end
+                else
+                    reactor_rodType[reactorNum] = "-"
+                    reactor_rodCount[reactorNum] = 0
+                    reactor_rodExpected[reactorNum] = 0
+                    reactor_rodMultiplier[reactorNum] = 1
+                    reactor_rodLevel[reactorNum] = 1
+                    return
+                end
+            else
+                reactor_rodType[reactorNum] = "-"
+                reactor_rodCount[reactorNum] = 0
+                reactor_rodExpected[reactorNum] = 0
+                reactor_rodMultiplier[reactorNum] = 1
+                reactor_rodLevel[reactorNum] = 1
+                return
+            end
+        end
+
+        -- Попробуем разные методы для получения информации о стержнях
         local rods = safeCallwg(proxy, "getAllFuelRodsStatus", nil)
+        if not rods then
+            rods = safeCallwg(proxy, "getFuelRodInfo", nil)
+        end
+        if not rods then
+            rods = safeCallwg(proxy, "getFuelRods", nil)
+        end
+        if not rods then
+            -- Попробуем получить количество стержней напрямую
+            local fuelRodCount = safeCall(proxy, "getFuelRodCount", 0)
+            if fuelRodCount and fuelRodCount > 0 then
+                -- Если есть метод getFuelRodCount, создадим массив с соответствующим количеством
+                rods = {}
+                for i = 1, fuelRodCount do
+                    rods[i] = {size = 1}  -- заглушка, предполагаем что стержень есть
+                end
+                if debugLog then
+                    logError("Using getFuelRodCount: " .. fuelRodCount .. " rods")
+                end
+            end
+        end
+        if not rods then
+            -- Попробуем получить информацию по слотам
+            rods = {}
+            local maxSlots = 54  -- предполагаем максимум 54 слота для большого реактора
+            for slot = 1, maxSlots do
+                local slotInfo = safeCallwg(proxy, "getFuelRod", slot - 1)  -- 0-based indexing
+                if slotInfo then
+                    rods[slot] = slotInfo
+                else
+                    break  -- если слот пустой, прекращаем
+                end
+            end
+        end
+
+        -- Отладка: проверим что возвращает метод
+        if debugLog then
+            logError("Fuel rods info for reactor #" .. reactorNum ..
+                    ": type=" .. type(rods) ..
+                    ", rods=" .. (rods and tostring(#rods) or "nil"))
+            if type(rods) == "table" then
+                for idx, rod in ipairs(rods) do
+                    if idx <= 3 then  -- логируем только первые 3 слота для краткости
+                        logError("  Slot " .. idx .. ": " ..
+                                (rod and "present" or "nil") ..
+                                (rod and type(rod) == "table" and
+                                 ", name=" .. tostring(rod.name or rod.label) ..
+                                 ", size=" .. tostring(rod.size or rod.count) or ""))
+                    end
+                end
+            end
+        end
+
         if type(rods) ~= "table" then
             reactor_rodType[reactorNum] = "-"
             reactor_rodCount[reactorNum] = 0
@@ -4166,8 +4279,16 @@ local function mainLoop()
                 if second % 13 == 0 then
                     for i = 1, reactors do
                         local proxy = reactors_proxy[i]
-                        if proxy and proxy.hasWork then
-                            reactor_work[i] = safeCall(proxy, "hasWork", false)
+                        if proxy then
+                            -- Попробуем разные методы для проверки работы реактора
+                            local workStatus = safeCall(proxy, "hasWork", nil)
+                            if workStatus == nil then
+                                workStatus = safeCall(proxy, "isActive", nil)
+                            end
+                            if workStatus == nil then
+                                workStatus = safeCall(proxy, "getActive", nil)
+                            end
+                            reactor_work[i] = workStatus or false
                             reactor_type[i] = safeCall(proxy, "isActiveCooling", false) and "Fluid" or "Air"
                         else
                             reactor_work[i] = false
