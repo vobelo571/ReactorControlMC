@@ -2,7 +2,7 @@
 -- Author: Flixmo
 -- ProgV 1.1.3
 ------------------------------------ config ------------------------------------
-local REPOSITORY  = "https://raw.githubusercontent.com/Flixmo/Reactor-Control-for-OpenComputers/refs/heads/main/"
+local REPOSITORY  = "https://raw.githubusercontent.com/vobelo571/ReactorControlMC/refs/heads/main/"
 
 local filesToDownload = {
   {url = REPOSITORY.."/lib/advancedLua.lua",                path="/lib/advancedLua.lua"},
