@@ -2847,25 +2847,40 @@ local function drawRodsOrderMenu(reactorNum)
 
     local key = getReactorKey(reactorNum)
     local preset = (rodPresetByAddr and rodPresetByAddr[key]) or {}
-    local autoOn = (rodAutoByAddr and rodAutoByAddr[key]) and true or false
-
-    local curId = tostring(preset.id or ""):match("^%s*(.-)%s*$")
-    if curId == "" then
-        -- подберём ID по распознанному типу/кратности из каталога
-        local t = tostring(reactor_rodType[reactorNum] or "")
-        local mult = tonumber(reactor_rodMultiplier[reactorNum]) or 1
-        local inferred = getRodIdByTypeAndMult(t, mult)
-        if inferred then
-            curId = inferred
-        end
-    end
-
-    local curQty = tonumber(preset.qty) or (tonumber(reactor_rodExpected[reactorNum]) or 0)
-    if curQty < 0 then curQty = 0 end
 
     local remember = (preset.id ~= nil and tostring(preset.id) ~= "")
 
-    local modalX, modalY, modalW, modalH = 30, 8, 80, 22
+    local function parseMultFromId(id)
+        id = tostring(id or ""):lower()
+        if id:find("sixteen") then return 16 end
+        if id:find("quad") then return 4 end
+        return nil
+    end
+
+    local function normalizeTypeFromId(id)
+        local t = normalizeRodType(id)
+        if t then return t end
+        return nil
+    end
+
+    local selectedMult = tonumber(reactor_rodMultiplier[reactorNum]) or 16
+    if selectedMult ~= 4 and selectedMult ~= 16 then selectedMult = 16 end
+
+    local presetId = tostring(preset.id or ""):match("^%s*(.-)%s*$")
+    if presetId ~= "" then
+        selectedMult = parseMultFromId(presetId) or selectedMult
+    end
+
+    local selectedType = tostring(reactor_rodType[reactorNum] or "")
+    if selectedType ~= "Уран" and selectedType ~= "MOX" and selectedType ~= "Калифорний" and selectedType ~= "Ксирдалий-Визамиумное" then
+        selectedType = normalizeTypeFromId(presetId) or "Уран"
+    end
+
+    local function inferId()
+        return getRodIdByTypeAndMult(selectedType, selectedMult)
+    end
+
+    local modalX, modalY, modalW, modalH = 40, 10, 70, 13
     local old = buffer.copy(1, 1, 160, 50)
     buffer.drawRectangle(1, 1, 160, 50, 0x000000, 0, " ", 0.4)
     buffer.drawRectangle(modalX, modalY, modalW, modalH, 0xcccccc, 0, " ")
@@ -2880,22 +2895,7 @@ local function drawRodsOrderMenu(reactorNum)
 
     removeAllFields()
 
-    buffer.drawText(modalX + 3, modalY + 1, 0x000000, "Реактор #" .. reactorNum .. " — Заказ стержней")
-    buffer.drawText(modalX + 3, modalY + 3, 0x000000, "ID стержня (modid:item) или label:")
-    createSearchField(modalX + 3, modalY + 5, 40, "например: modid:item")
-    searchFields[1].text = curId
-    searchFields[1].cursorPos = unicode.len(searchFields[1].text) + 1
-
-    buffer.drawText(modalX + 3, modalY + 7, 0x000000, "Количество (всего, с учётом уровня):")
-    createSearchField(modalX + 3, modalY + 9, 14, "например: 78")
-    searchFields[2].text = tostring(curQty)
-    searchFields[2].cursorPos = unicode.len(searchFields[2].text) + 1
-
-    local cnt = tonumber(reactor_rodCount[reactorNum]) or 0
-    local exp = tonumber(reactor_rodExpected[reactorNum]) or 0
-    local lvl = tonumber(reactor_rodLevel[reactorNum]) or 1
-    buffer.drawText(modalX + 50, modalY + 5, 0x000000, "Текущее: " .. tostring(cnt) .. "/" .. tostring(exp))
-    buffer.drawText(modalX + 50, modalY + 6, 0x000000, "Уровень: " .. tostring(lvl))
+    buffer.drawText(modalX + 3, modalY + 1, 0x000000, "Реактор #" .. reactorNum .. " — Стержни")
 
     local function drawCheck(x, y, label, state)
         local bg = state and 0x2beb1a or 0x444444
@@ -2904,62 +2904,50 @@ local function drawRodsOrderMenu(reactorNum)
         buffer.drawText(x + 5, y, 0x000000, label)
     end
 
-    local rememberX, rememberY = modalX + 3, modalY + 12
-    local autoX, autoY = modalX + 3, modalY + 14
+    local rememberX, rememberY = modalX + 3, modalY + 3
     drawCheck(rememberX, rememberY, "Запомнить выбор", remember)
-    drawCheck(autoX, autoY, "Автопополнение для этого реактора", autoOn)
 
-    buffer.drawText(modalX + 3, modalY + 16, 0x000000, "Быстрый выбор (из списка доступных стержней):")
-    local function drawTypeBtn(x, y, text, color)
-        buffer.drawRectangle(x, y, 14, 1, color, 0, " ")
-        buffer.drawText(x, y, 0xffffff, shortenNameCentered(text, 14))
-    end
-    local b1x, b2x, b3x, b4x = modalX + 3, modalX + 18, modalX + 33, modalX + 48
-    local by16 = modalY + 18
-    local by4 = modalY + 19
-
-    local function drawPickRow(mult, y)
-        local colorOn = 0x38afff
-        local colorOff = 0x666666
-        buffer.drawText(modalX + 63, y, 0x000000, "x" .. tostring(mult))
-
-        local function btn(x, txt, rodType)
-            local id = getRodIdByTypeAndMult(rodType, mult)
-            drawTypeBtn(x, y, txt, id and colorOn or colorOff)
+    local multY = modalY + 5
+    local multX4, multX16 = modalX + 3, modalX + 15
+    local function drawMultButtons()
+        buffer.drawText(modalX + 3, multY, 0x000000, "Кратность:")
+        local function btn(x, label, mult)
+            local on = (selectedMult == mult)
+            local bg = on and 0x2f8cff or 0x666666
+            buffer.drawRectangle(x, multY + 1, 10, 1, bg, 0, " ")
+            buffer.drawText(x, multY + 1, 0xffffff, shortenNameCentered(label, 10))
         end
-
-        btn(b1x, "Уран", "Уран")
-        btn(b2x, "MOX", "MOX")
-        btn(b3x, "Калиф.", "Калифорний")
-        btn(b4x, "Ксирд.", "Ксирдалий-Визамиумное")
+        btn(multX4, "x4", 4)
+        btn(multX16, "x16", 16)
     end
 
-    drawPickRow(16, by16)
-    drawPickRow(4, by4)
+    local typesY = modalY + 8
+    local t1x, t2x, t3x, t4x = modalX + 3, modalX + 18, modalX + 33, modalX + 48
+    local function drawTypeButtons()
+        buffer.drawText(modalX + 3, typesY - 1, 0x000000, "Тип:")
+        local function btn(x, txt, rodType)
+            local on = (selectedType == rodType)
+            local id = getRodIdByTypeAndMult(rodType, selectedMult)
+            local bg = id and (on and 0x2f8cff or 0x38afff) or 0x666666
+            buffer.drawRectangle(x, typesY, 14, 1, bg, 0, " ")
+            buffer.drawText(x, typesY, 0xffffff, shortenNameCentered(txt, 14))
+        end
+        btn(t1x, "Уран", "Уран")
+        btn(t2x, "MOX", "MOX")
+        btn(t3x, "Калиф.", "Калифорний")
+        btn(t4x, "Ксирд.", "Ксирдалий-Визамиумное")
+    end
 
-    local btnY = modalY + modalH - 3
-    local btnOrderX, btnSaveX, btnCloseX = modalX + 3, modalX + 23, modalX + 43
-    buffer.drawRectangle(btnOrderX, btnY, 18, 1, 0x2f8cff, 0, " ")
-    buffer.drawText(btnOrderX, btnY, 0xffffff, shortenNameCentered("Заказать", 18))
-    buffer.drawRectangle(btnSaveX, btnY, 18, 1, 0x8100cc, 0, " ")
-    buffer.drawText(btnSaveX, btnY, 0xffffff, shortenNameCentered("Сохранить", 18))
-    buffer.drawRectangle(btnCloseX, btnY, 18, 1, 0x444444, 0, " ")
-    buffer.drawText(btnCloseX, btnY, 0xffffff, shortenNameCentered("Закрыть", 18))
+    local hintY = modalY + modalH - 2
+    buffer.drawText(modalX + 3, hintY, 0x666666, "Клик по типу — сразу заказать. Вне окна — закрыть.")
 
-    buffer.drawText(modalX + 3, modalY + modalH - 1, 0x666666, "Клик вне окна — закрыть без сохранения")
+    drawMultButtons()
+    drawTypeButtons()
     buffer.drawChanges()
 
     while true do
         local eventData = {event.pull(0.05)}
         local eventType = eventData[1]
-
-        for _, f in ipairs(searchFields) do
-            if f.active and computer.uptime() - f.lastBlink >= 0.5 then
-                f.cursorVisible = not f.cursorVisible
-                f.lastBlink = computer.uptime()
-                drawAllFields()
-            end
-        end
 
         if eventType == "touch" then
             local _, _, x, y, button, uuid = table.unpack(eventData)
@@ -2970,105 +2958,45 @@ local function drawRodsOrderMenu(reactorNum)
                 break
             end
 
-            for i, f in ipairs(searchFields) do
-                if y == f.y and x >= f.x and x <= f.x + f.width - 1 then
-                    for _, f2 in ipairs(searchFields) do
-                        f2.active, f2.cursorVisible = false, false
-                    end
-                    f.active = true
-                    f.cursorVisible = true
-                    f.lastBlink = computer.uptime()
-                else
-                    if f.active then
-                        f.active = false
-                        f.cursorVisible = false
-                    end
-                end
-            end
-            drawAllFields()
-
             if y == rememberY and x >= rememberX and x <= rememberX + 3 then
                 remember = not remember
                 drawCheck(rememberX, rememberY, "Запомнить выбор", remember)
                 buffer.drawChanges()
-            elseif y == autoY and x >= autoX and x <= autoX + 3 then
-                autoOn = not autoOn
-                drawCheck(autoX, autoY, "Автопополнение для этого реактора", autoOn)
-                buffer.drawChanges()
-            elseif y == by16 or y == by4 then
-                local mult = (y == by16) and 16 or 4
-                local function pick(rodType)
-                    local id = getRodIdByTypeAndMult(rodType, mult)
-                    if id then
-                        searchFields[1].text = id
-                        searchFields[1].cursorPos = unicode.len(searchFields[1].text) + 1
-                        drawAllFields()
+            elseif y == multY + 1 then
+                if x >= multX4 and x < multX4 + 10 then
+                    selectedMult = 4
+                    drawMultButtons()
+                    drawTypeButtons()
+                    buffer.drawChanges()
+                elseif x >= multX16 and x < multX16 + 10 then
+                    selectedMult = 16
+                    drawMultButtons()
+                    drawTypeButtons()
+                    buffer.drawChanges()
+                end
+            elseif y == typesY then
+                local function clickType(rodType)
+                    selectedType = rodType
+                    local id = inferId()
+                    if not id then
+                        message("Для этого типа/кратности нет ID стержня в списке.", colors.msgwarn, 34)
+                        drawTypeButtons()
+                        buffer.drawChanges()
+                        return
                     end
-                end
-                if x >= b1x and x < b1x + 14 then pick("Уран")
-                elseif x >= b2x and x < b2x + 14 then pick("MOX")
-                elseif x >= b3x and x < b3x + 14 then pick("Калифорний")
-                elseif x >= b4x and x < b4x + 14 then pick("Ксирдалий-Визамиумное")
-                end
-            elseif y == btnY then
-                local id = searchFields[1].text
-                local qty = tonumber(searchFields[2].text) or 0
-                if x >= btnOrderX and x < btnOrderX + 18 then
-                    orderRodsPresetForReactor(reactorNum, id, qty, remember, autoOn)
+                    local desired = tonumber(reactor_rodExpected[reactorNum]) or 0
+                    orderRodsPresetForReactor(reactorNum, id, desired, remember, nil)
                     buffer.paste(1, 1, old)
                     buffer.drawChanges()
                     drawWidgets()
                     break
-                elseif x >= btnSaveX and x < btnSaveX + 18 then
-                    local k = getReactorKey(reactorNum)
-                    if remember then
-                        rodPresetByAddr[k] = { id = tostring(id or ""), qty = math.floor(tonumber(qty) or 0) }
-                    else
-                        rodPresetByAddr[k] = nil
-                    end
-                    rodAutoByAddr[k] = autoOn and true or false
-                    saveCfg()
-                    buffer.paste(1, 1, old)
-                    buffer.drawChanges()
-                    drawWidgets()
-                    break
-                elseif x >= btnCloseX and x < btnCloseX + 18 then
-                    buffer.paste(1, 1, old)
-                    buffer.drawChanges()
-                    break
+                end
+                if x >= t1x and x < t1x + 14 then clickType("Уран")
+                elseif x >= t2x and x < t2x + 14 then clickType("MOX")
+                elseif x >= t3x and x < t3x + 14 then clickType("Калифорний")
+                elseif x >= t4x and x < t4x + 14 then clickType("Ксирдалий-Визамиумное")
                 end
             end
-        elseif eventType == "key_down" then
-            local _, _, char, code = table.unpack(eventData)
-            for i, f in ipairs(searchFields) do
-                if f.active then
-                    if code == 14 then -- Backspace
-                        if f.cursorPos > 1 then
-                            f.text = f.text:sub(1, f.cursorPos - 2) .. f.text:sub(f.cursorPos)
-                            f.cursorPos = f.cursorPos - 1
-                        end
-                    elseif code == 203 then -- left
-                        if f.cursorPos > 1 then f.cursorPos = f.cursorPos - 1 end
-                    elseif code == 205 then -- right
-                        if f.cursorPos <= #f.text then f.cursorPos = f.cursorPos + 1 end
-                    elseif char >= 32 and char <= 126 then
-                        local c = string.char(char)
-                        if i == 2 then
-                            if c:match("%d") then
-                                f.text = f.text:sub(1, f.cursorPos - 1) .. c .. f.text:sub(f.cursorPos)
-                                f.cursorPos = f.cursorPos + 1
-                            end
-                        else
-                            f.text = f.text:sub(1, f.cursorPos - 1) .. c .. f.text:sub(f.cursorPos)
-                            f.cursorPos = f.cursorPos + 1
-                        end
-                    elseif code == 28 then -- Enter
-                        f.active = false
-                        f.cursorVisible = false
-                    end
-                end
-            end
-            drawAllFields()
         end
     end
 end
