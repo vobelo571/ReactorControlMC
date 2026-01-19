@@ -1954,6 +1954,36 @@ local function detectReactorRodInfo(reactorNum, debugDump)
             return false
         end
 
+        -- Последний fallback: некоторые версии HTC-reactors не дают ни id, ни count,
+        -- но заполненный слот содержит какие-то данные (например число "6" или флаг).
+        local function rodLooksNonEmpty(rod)
+            if type(rod) ~= "table" then return false end
+            if rod.name or rod.label or rod.size or rod.count or rod.amount or rod.qty then
+                return true
+            end
+            for _, v in pairs(rod) do
+                local tv = type(v)
+                if tv == "number" then
+                    if v ~= 0 then return true end
+                elseif tv == "boolean" then
+                    if v then return true end
+                elseif tv == "string" then
+                    if v ~= "" then return true end
+                end
+            end
+            for _, v in ipairs(rod) do
+                local tv = type(v)
+                if tv == "number" then
+                    if v ~= 0 then return true end
+                elseif tv == "boolean" then
+                    if v then return true end
+                elseif tv == "string" then
+                    if v ~= "" then return true end
+                end
+            end
+            return false
+        end
+
         -- PASS 1: определяем уровень (bestLevel) максимально устойчиво,
         -- даже если в записи слота нет строк/ID.
         for _, rod in ipairs(rods) do
@@ -1983,7 +2013,7 @@ local function detectReactorRodInfo(reactorNum, debugDump)
         -- PASS 2: считаем текущее кол-во.
         -- Предпочтительно — суммой rod.size/rod.count (это реальное число предметов в слотах),
         -- иначе (если мод не даёт count) — по занятым слотам * bestLevel.
-        local occByCount, occById, occByBigN = 0, 0, 0
+        local occByCount, occById, occByBigN, occByAny = 0, 0, 0, 0
         local firstEmptyIdx = nil
 
         for idx, rod in ipairs(rods) do
@@ -2006,6 +2036,10 @@ local function detectReactorRodInfo(reactorNum, debugDump)
                     occupied = true
                     presentSum = presentSum + bestLevel
                     occByBigN = occByBigN + 1
+                elseif rodLooksNonEmpty(rod) then
+                    occupied = true
+                    presentSum = presentSum + bestLevel
+                    occByAny = occByAny + 1
                 end
 
                 if occupied then
@@ -2068,7 +2102,7 @@ local function detectReactorRodInfo(reactorNum, debugDump)
 
         if debugDump then
             dbg("DBG rods slots=" .. tostring(slotCount) .. " lvl=" .. tostring(bestLevel))
-            dbg("DBG occ count/id/bigN=" .. tostring(occByCount) .. "/" .. tostring(occById) .. "/" .. tostring(occByBigN))
+            dbg("DBG occ count/id/bigN/any=" .. tostring(occByCount) .. "/" .. tostring(occById) .. "/" .. tostring(occByBigN) .. "/" .. tostring(occByAny))
             for i = 1, math.min(slotCount, 3) do
                 dbgRodLines(i, rods[i], "DBG[" .. tostring(i) .. "]")
             end
@@ -2083,13 +2117,15 @@ local function detectReactorRodInfo(reactorNum, debugDump)
                 if not f then return end
                 f:write("Reactor #" .. tostring(reactorNum) .. "\n")
                 f:write("slots=" .. tostring(slotCount) .. " level=" .. tostring(bestLevel) .. "\n")
-                f:write("occByCount=" .. tostring(occByCount) .. " occById=" .. tostring(occById) .. " occByBigN=" .. tostring(occByBigN) .. "\n\n")
+                f:write("occByCount=" .. tostring(occByCount) .. " occById=" .. tostring(occById) .. " occByBigN=" .. tostring(occByBigN) .. " occByAny=" .. tostring(occByAny) .. "\n\n")
                 local dumpN = math.min(slotCount, 12)
                 for i = 1, dumpN do
                     local rid = extractRodIdentity(rods[i])
                     local rc = extractRodCount(rods[i])
                     local rmax = maxNumberInRod(rods[i])
-                    f:write("[" .. i .. "] id=" .. tostring(rid) .. " count=" .. tostring(rc) .. " maxN=" .. tostring(rmax) .. "\n")
+                    local rbig = rodHasLargeNumber(rods[i]) and "1" or "0"
+                    local rany = rodLooksNonEmpty(rods[i]) and "1" or "0"
+                    f:write("[" .. i .. "] id=" .. tostring(rid) .. " count=" .. tostring(rc) .. " maxN=" .. tostring(rmax) .. " big=" .. rbig .. " any=" .. rany .. "\n")
                     if type(rods[i]) == "table" then
                         local keys = {}
                         for k, v in pairs(rods[i]) do
