@@ -1854,8 +1854,6 @@ local function detectReactorRodInfo(reactorNum)
 
         local slotCount = #rods
         local presentSlots = 0
-        local presentSum = 0 -- сумма точных count (если count известен)
-        local presentCountSlots = 0 -- сколько занятых слотов дали точный count
         local typeCounts = {}
         local multCounts = {}
         local levelCounts = {}
@@ -1878,157 +1876,25 @@ local function detectReactorRodInfo(reactorNum)
             levelCounts[n] = (levelCounts[n] or 0) + 1
         end
 
-        local function extractRodCountLimited(rod)
-            if type(rod) ~= "table" then return nil end
-            local c = tonumber(rod.size) or tonumber(rod.count) or tonumber(rod.amount) or tonumber(rod.qty)
-            if not c then return nil end
-            if c % 1 ~= 0 then return nil end
-            if c < 1 or c > 64 then return nil end
-            return c
-        end
+        for _, rod in ipairs(rods) do
+            if type(rod) == "table" then
+                local id = extractRodIdentity(rod)
+                if id then
+                    presentSlots = presentSlots + 1
+                    addType(id)
 
-        local function rodHasLargeNumber(rod)
-            if type(rod) ~= "table" then return false end
-            for _, v in pairs(rod) do
-                local n = tonumber(v)
-                if n and n > 64 then
-                    return true
-                end
-            end
-            for _, v in ipairs(rod) do
-                local n = tonumber(v)
-                if n and n > 64 then
-                    return true
-                end
-            end
-            return false
-        end
-
-        local function rodLooksNonEmpty(rod)
-            if type(rod) ~= "table" then return false end
-            if rod.name or rod.label or rod.size or rod.count or rod.amount or rod.qty then
-                return true
-            end
-            for _, v in pairs(rod) do
-                local tv = type(v)
-                if tv == "number" then
-                    if v ~= 0 then return true end
-                elseif tv == "boolean" then
-                    if v then return true end
-                elseif tv == "string" then
-                    if v ~= "" then return true end
-                elseif tv == "table" or tv == "userdata" or tv == "function" then
-                    -- некоторые версии HTC могут класть структуру в виде вложенной таблицы/объекта
-                    return true
-                end
-            end
-            for _, v in ipairs(rod) do
-                local tv = type(v)
-                if tv == "number" then
-                    if v ~= 0 then return true end
-                elseif tv == "boolean" then
-                    if v then return true end
-                elseif tv == "string" then
-                    if v ~= "" then return true end
-                elseif tv == "table" or tv == "userdata" or tv == "function" then
-                    return true
-                end
-            end
-            return false
-        end
-
-        local function analyzeEntry(entry)
-            local t = type(entry)
-            local out = {
-                occupied = false,
-                count = nil, -- 1..64 (точный size/count)
-                id = nil,
-                strings = nil
-            }
-
-            if t == "table" then
-                out.count = extractRodCountLimited(entry)
-                out.id = extractRodIdentity(entry)
-                out.strings = collectStrings(entry)
-                if out.count and out.count > 0 then
-                    out.occupied = true
-                elseif out.id then
-                    out.occupied = true
-                elseif rodHasLargeNumber(entry) or rodLooksNonEmpty(entry) then
-                    out.occupied = true
-                end
-            elseif t == "number" then
-                local n = tonumber(entry)
-                if n and n % 1 == 0 then
-                    if n >= 1 and n <= 64 then
-                        out.count = n
-                        out.occupied = (n > 0)
-                    elseif n > 64 then
-                        out.occupied = true
-                    end
-                    if n >= 2 and n <= 64 then
+                    -- уровень берём по моде среди маленьких чисел в записи rod[...] (включая строковые "6")
+                    for _, n in ipairs(collectSmallIntsOnce(rod)) do
                         addLevelCandidate(n)
                     end
-                end
-            elseif t == "string" then
-                local s = tostring(entry)
-                if s ~= "" then
-                    out.occupied = true
-                    out.strings = { s }
-                    if s:find(":") then
-                        out.id = s
-                    end
-                    local n = tonumber(s)
-                    if n then addLevelCandidate(n) end
-                end
-            elseif t == "boolean" then
-                out.occupied = (entry == true)
-            end
 
-            return out
-        end
-
-        -- PASS 1: максимально устойчиво определяем уровень (stack size per slot)
-        for _, rod in ipairs(rods) do
-            local rt = type(rod)
-            if rt == "table" then
-                local c = extractRodCountLimited(rod)
-                if c and c >= 2 and c <= 64 then
-                    addLevelCandidate(c)
-                end
-                for _, n in ipairs(collectSmallIntsOnce(rod)) do
-                    addLevelCandidate(n)
-                end
-            elseif rt == "number" then
-                addLevelCandidate(rod)
-            elseif rt == "string" then
-                local n = tonumber(rod)
-                if n then addLevelCandidate(n) end
-            end
-        end
-
-        -- PASS 2: считаем текущее кол-во стержней:
-        -- - если есть rod.size/rod.count (1..64) — суммируем его (это точное число предметов)
-        -- - иначе: занятый слот считаем как full-stack (bestLevel)
-        -- “занятость” определяем по: ID/label/name/любым данным в слоте/большим числам (топливо 20000 и т.п.)
-        for _, rod in ipairs(rods) do
-            local a = analyzeEntry(rod)
-            if a.occupied then
-                presentSlots = presentSlots + 1
-            end
-            if a.count and a.count > 0 then
-                presentSum = presentSum + a.count
-                presentCountSlots = presentCountSlots + 1
-            end
-            if a.id then
-                addType(a.id)
-            end
-            if a.strings then
-                for _, s in ipairs(a.strings) do
-                    local m = parseRodMultiplierFromText(s)
-                    if m then
-                        addMult(m)
-                        break
+                    local strings = collectStrings(rod)
+                    for _, s in ipairs(strings) do
+                        local m = parseRodMultiplierFromText(s)
+                        if m then
+                            addMult(m)
+                            break
+                        end
                     end
                 end
             end
@@ -2046,18 +1912,8 @@ local function detectReactorRodInfo(reactorNum)
         if bestLevel < 1 then bestLevel = 1 end
         reactor_rodLevel[reactorNum] = bestLevel
 
+        local present = presentSlots * bestLevel
         local expected = slotCount * bestLevel
-        -- Досчитываем слоты, где count не удалось извлечь:
-        -- total = sum(точных count) + (occupiedSlots - slotsWithCount) * level
-        local missingCountSlots = presentSlots - presentCountSlots
-        if missingCountSlots < 0 then missingCountSlots = 0 end
-        presentSum = presentSum + (missingCountSlots * bestLevel)
-
-        local present = tonumber(presentSum) or 0
-        -- защита от выхода за пределы
-        if present < 0 then present = 0 end
-        if expected < 0 then expected = 0 end
-        if present > expected then present = expected end
 
         local bestType, bestTypeCount = nil, 0
         local distinctTypes = 0
@@ -3015,21 +2871,15 @@ local function drawRodsOrderMenu(reactorNum)
     local selectedType = "Уран"
 
     local presetId = tostring(preset.id or ""):match("^%s*(.-)%s*$")
-    local hasPreset = (presetId ~= "")
     if presetId ~= "" then
         selectedMult = parseMultFromId(presetId) or selectedMult
         selectedType = normalizeSelectedType(normalizeRodType(presetId)) or selectedType
     end
-    -- Важно: если есть сохранённый пресет, НЕ переопределяем выбор значениями из реактора.
-    if not hasPreset then
-        selectedMult = tonumber(reactor_rodMultiplier[reactorNum]) or selectedMult
-        if selectedMult ~= 4 and selectedMult ~= 16 then selectedMult = 16 end
 
-        selectedType = normalizeSelectedType(reactor_rodType[reactorNum]) or selectedType
-    else
-        if selectedMult ~= 4 and selectedMult ~= 16 then selectedMult = 16 end
-        selectedType = normalizeSelectedType(selectedType) or "Уран"
-    end
+    selectedMult = tonumber(reactor_rodMultiplier[reactorNum]) or selectedMult
+    if selectedMult ~= 4 and selectedMult ~= 16 then selectedMult = 16 end
+
+    selectedType = normalizeSelectedType(reactor_rodType[reactorNum]) or selectedType
 
     local function currentSelectedId()
         return getRodIdByTypeAndMult(selectedType, selectedMult)
@@ -3147,19 +2997,7 @@ local function drawRodsOrderMenu(reactorNum)
                         message("Для выбранного типа/кратности нет ID стержня в списке.", colors.msgwarn, 34)
                     else
                         local desired = tonumber(reactor_rodExpected[reactorNum]) or 0
-                        -- Управление пресетом:
-                        -- если remember=true, сохраняем выбранный ID (а qty = desired)
-                        -- если remember=false, удаляем ранее сохранённый пресет
-                        if remember then
-                            orderRodsPresetForReactor(reactorNum, id, desired, true, nil)
-                        else
-                            local k = getReactorKey(reactorNum)
-                            if rodPresetByAddr and rodPresetByAddr[k] ~= nil then
-                                rodPresetByAddr[k] = nil
-                                saveCfg()
-                            end
-                            orderRodsPresetForReactor(reactorNum, id, desired, false, nil)
-                        end
+                        orderRodsPresetForReactor(reactorNum, id, desired, remember, nil)
                     end
                     buffer.paste(1, 1, old)
                     buffer.drawChanges()
