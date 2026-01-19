@@ -4052,6 +4052,15 @@ local function safeTraceback(err)
     return msg
 end
 
+local function writeCrashLog(err)
+    local f = io.open("/home/reactor_crash.log", "a")
+    if not f then
+        return
+    end
+    f:write(string.format("[%s] %s\n", os.date("%Y-%m-%d %H:%M:%S"), tostring(err)))
+    f:close()
+end
+
 local lastCrashTime = 0
 while not exit do
     local ok, err = xpcall(mainLoop, safeTraceback)
@@ -4071,6 +4080,7 @@ while not exit do
 
         logError("Global Error:")
         logError(err)
+        writeCrashLog(err)
         message("Code: " .. tostring(err), 0xff0000, 34)
         message("Global Error!", 0xff0000, 34)
         message("Restarting in 3 seconds...", 0xffa500, 34)
