@@ -1572,6 +1572,28 @@ local function getFuelTypeLabel(proxy)
     return nil
 end
 
+local function getRodCountFromController(proxy)
+    if not proxy then
+        return nil
+    end
+    local methods = {
+        "getNumberOfFuelRods",
+        "getFuelRodCount",
+        "getFuelRodsCount",
+        "getFuelRodColumns",
+        "getNumberOfControlRods",
+        "getControlRodCount",
+        "getControlRodsCount",
+    }
+    for _, method in ipairs(methods) do
+        local count = safeCall(proxy, method, nil)
+        if type(count) == "number" and count > 0 then
+            return math.floor(count)
+        end
+    end
+    return nil
+end
+
 local function getReactorLevel(proxy)
     if not proxy then
         return 1
@@ -1598,6 +1620,7 @@ local function updateRodData(num)
         local counts = nil
         local maxCount = 0
         local totalCount = 0
+        local controllerCount = nil
         if proxy then
             reactor_level[i] = getReactorLevel(proxy) or 1
             counts, totalCount, maxCount = countRodsFromStatus(proxy)
@@ -1631,16 +1654,24 @@ local function updateRodData(num)
                     counts, totalCount, maxCount = foundCounts, foundTotal, foundMax
                 end
             end
+            controllerCount = getRodCountFromController(proxy)
         end
-        local lvl = reactor_level[i] or 1
-        if lvl > 1 and (totalCount or 0) > 0 then
-            if type(counts) == "table" then
-                for id, c in pairs(counts) do
-                    counts[id] = (tonumber(c) or 0) * lvl
-                end
+        if controllerCount and controllerCount > 0 then
+            maxCount = controllerCount
+            if (totalCount or 0) == 0 then
+                totalCount = controllerCount
             end
-            totalCount = (tonumber(totalCount) or 0) * lvl
-            maxCount = (tonumber(maxCount) or 0) * lvl
+        else
+            local lvl = reactor_level[i] or 1
+            if lvl > 1 and (totalCount or 0) > 0 then
+                if type(counts) == "table" then
+                    for id, c in pairs(counts) do
+                        counts[id] = (tonumber(c) or 0) * lvl
+                    end
+                end
+                totalCount = (tonumber(totalCount) or 0) * lvl
+                maxCount = (tonumber(maxCount) or 0) * lvl
+            end
         end
         reactor_rod_counts[i] = counts or {}
         reactor_rod_summary[i] = formatRodCounts(counts)
