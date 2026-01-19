@@ -98,6 +98,8 @@ local reactor_getcoolant = {}
 local reactor_maxcoolant = {}
 local reactor_depletionTime = {}
 local reactor_ConsumptionPerSecond = {}
+local reactor_rod_counts = {}
+local reactor_rod_summary = {}
 local last_me_address = nil
 local me_network = false
 local me_proxy = nil
@@ -175,6 +177,24 @@ local colors = {
 }
 
 -- ----------------------------------------------------------------------------------------------------
+
+local rod_types = {
+    ["htc_reactors:quad_uranium_fuel_rod"] = "Уран x4",
+    ["htc_reactors:sixteen_uraium_fuel_rod"] = "Уран x16",
+    ["htc_reactors:quad_mox_fuel_rod"] = "MOX x4",
+    ["htc_reactors:sixteen_mox_fuel_rod"] = "MOX x16",
+    ["htc_reactors:quad_californium_fuel_rod"] = "Калифорний x4",
+    ["htc_reactors:quad_ksirviz_fuel_rod"] = "Ксирд.-Визамиум x4",
+}
+
+local rod_order = {
+    "htc_reactors:quad_uranium_fuel_rod",
+    "htc_reactors:sixteen_uraium_fuel_rod",
+    "htc_reactors:quad_mox_fuel_rod",
+    "htc_reactors:sixteen_mox_fuel_rod",
+    "htc_reactors:quad_californium_fuel_rod",
+    "htc_reactors:quad_ksirviz_fuel_rod",
+}
 
 local function brailleChar(dots)
     return unicode.char(
@@ -457,6 +477,8 @@ local function initReactors()
         temperature[i] = 0
         reactor_aborted[i] = false
         reactor_depletionTime[i] = 0
+        reactor_rod_counts[i] = {}
+        reactor_rod_summary[i] = "н/д"
     end
 end
 
@@ -1162,6 +1184,143 @@ local function safeCall(proxy, method, default, ...)
     return default
 end
 
+local function extractRodId(rod)
+    if type(rod) ~= "table" then
+        return nil
+    end
+    local candidates = {
+        rod.name, rod.id, rod.item, rod.itemName, rod.itemId, rod.type,
+        rod[1], rod[2], rod[3], rod.stack, rod.itemStack
+    }
+    for _, value in ipairs(candidates) do
+        if type(value) == "string" and value:find(":") then
+            return value
+        elseif type(value) == "table" then
+            local nested = value.name or value.id or value.item or value.itemName or value.itemId or value[1]
+            if type(nested) == "string" and nested:find(":") then
+                return nested
+            end
+        end
+    end
+    return nil
+end
+
+local function getInventorySize(proxy)
+    local size = safeCall(proxy, "getInventorySize", nil)
+    if type(size) == "number" and size > 0 then
+        return size, nil
+    end
+    for side = 0, 5 do
+        size = safeCall(proxy, "getInventorySize", nil, side)
+        if type(size) == "number" and size > 0 then
+            return size, side
+        end
+    end
+    size = safeCall(proxy, "getSizeInventory", nil)
+    if type(size) == "number" and size > 0 then
+        return size, nil
+    end
+    return nil, nil
+end
+
+local function getStackInSlot(proxy, side, slot)
+    local stack
+    if side == nil then
+        stack = safeCall(proxy, "getStackInSlot", nil, slot)
+        if type(stack) == "table" then
+            return stack
+        end
+        stack = safeCall(proxy, "getStackInSlot", nil, slot, nil)
+        if type(stack) == "table" then
+            return stack
+        end
+    else
+        stack = safeCall(proxy, "getStackInSlot", nil, side, slot)
+        if type(stack) == "table" then
+            return stack
+        end
+    end
+    return nil
+end
+
+local function countRodsFromStatus(proxy)
+    local rods = safeCallwg(proxy, "getAllFuelRodsStatus", nil)
+    if type(rods) ~= "table" then
+        return nil
+    end
+    local counts = {}
+    for _, rod in ipairs(rods) do
+        local id = extractRodId(rod)
+        if id then
+            counts[id] = (counts[id] or 0) + 1
+        end
+    end
+    return counts
+end
+
+local function countRodsFromInventory(proxy)
+    local size, side = getInventorySize(proxy)
+    if not size then
+        return nil
+    end
+    local counts = {}
+    for slot = 1, size do
+        local stack = getStackInSlot(proxy, side, slot)
+        if type(stack) == "table" then
+            local id = extractRodId(stack)
+            if id then
+                local count = tonumber(stack.size) or tonumber(stack.count) or 1
+                counts[id] = (counts[id] or 0) + math.max(count, 1)
+            end
+        end
+    end
+    return counts
+end
+
+local function formatRodCounts(counts)
+    if counts == nil then
+        return "н/д"
+    end
+    if next(counts) == nil then
+        return "нет"
+    end
+    local parts = {}
+    local unknown = 0
+    for _, id in ipairs(rod_order) do
+        local count = counts[id]
+        if count and count > 0 then
+            table.insert(parts, rod_types[id] .. ": " .. tostring(count))
+        end
+    end
+    for id, count in pairs(counts) do
+        if not rod_types[id] then
+            unknown = unknown + (tonumber(count) or 0)
+        end
+    end
+    if unknown > 0 then
+        table.insert(parts, "Неизв.: " .. tostring(unknown))
+    end
+    if #parts == 0 then
+        return "нет"
+    end
+    return table.concat(parts, ", ")
+end
+
+local function updateRodData(num)
+    for i = num or 1, num or reactors do
+        local proxy = reactors_proxy[i]
+        local counts = nil
+        if proxy then
+            counts = countRodsFromStatus(proxy)
+            if counts == nil or next(counts) == nil then
+                counts = countRodsFromInventory(proxy)
+            end
+        end
+        reactor_rod_counts[i] = counts or {}
+        reactor_rod_summary[i] = formatRodCounts(counts)
+    end
+end
+
 local function checkReactorStatus(num)
     any_reactor_on = false
     any_reactor_off = false
@@ -1575,6 +1734,7 @@ local function updateReactorData(num)
             reactor_maxcoolant[i] = safeCall(proxy, "getMaxFluidCoolant", 0) or 1
         end
     end
+    updateRodData(num)
     drawWidgets()
     drawRFinfo()
 end
@@ -2703,6 +2863,12 @@ local function handleChatCommand(nick, msg, args)
             chatBox.say("§aПорог: " .. porog .. " Mb")
             chatBox.say("§aГенерация реакторов: " .. rf .. " RF/t")
             chatBox.say("§aОбщее потребление жидкости реакторами: " .. consumeSecond .. " mB/s")
+            if reactors > 0 then
+                updateRodData()
+                for i = 1, reactors do
+                    chatBox.say("§aСтержни реактора " .. i .. ": " .. (reactor_rod_summary[i] or "н/д"))
+                end
+            end
             -- chatBox.say("§aСостояние реакторов:")
             -- for i = 1, reactors do
             --     if reactor_work[i] == true then
@@ -3189,6 +3355,8 @@ local function mainLoop()
     reactor_getcoolant = {}
     reactor_maxcoolant = {}
     reactor_depletionTime = {}
+    reactor_rod_counts = {}
+    reactor_rod_summary = {}
     
     me_proxy = nil
     me_network = false
