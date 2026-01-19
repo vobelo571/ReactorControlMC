@@ -1852,8 +1852,6 @@ local function detectReactorRodInfo(reactorNum)
             return
         end
 
-        local slotCount = #rods
-        local totalRodCount = 0
         local typeCounts = {}
         local multCounts = {}
         local levelCounts = {}
@@ -1880,8 +1878,6 @@ local function detectReactorRodInfo(reactorNum)
             if type(rod) == "table" then
                 local id = extractRodIdentity(rod)
                 if id then
-                    local rodCount = tonumber(rod.size) or tonumber(rod.count) or 1
-                    totalRodCount = totalRodCount + rodCount
                     addType(id)
 
                     -- уровень берём по моде среди маленьких чисел в записи rod[...] (включая строковые "6")
@@ -1913,7 +1909,8 @@ local function detectReactorRodInfo(reactorNum)
         if bestLevel < 1 then bestLevel = 1 end
         reactor_rodLevel[reactorNum] = bestLevel
 
-        local present = totalRodCount
+        local slotCount = math.max(bestLevel * 3, #rods)
+        local present = slotCount * bestLevel
         local expected = slotCount * bestLevel
 
         local bestType, bestTypeCount = nil, 0
@@ -2069,7 +2066,7 @@ local function getReactorRodsNeed(reactorNum)
         end
         if bestLevel < 1 then bestLevel = 1 end
 
-        local desired = (#rods) * bestLevel
+        local desired = math.max(bestLevel * 3, #rods) * bestLevel
         -- восстанавливаем filter из ключа
         for _, rod in ipairs(rods) do
             if type(rod) == "table" then
