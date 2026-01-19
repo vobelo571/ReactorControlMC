@@ -1322,6 +1322,25 @@ local function extractRodId(rod)
     return nil
 end
 
+local function isRodId(id)
+    if not id then
+        return false
+    end
+    if id == UNKNOWN_ROD_ID then
+        return true
+    end
+    if rod_types[id] then
+        return true
+    end
+    if type(id) == "string" then
+        local key = id:lower()
+        if key:find("fuel_rod") or key:find("fuelrod") then
+            return true
+        end
+    end
+    return false
+end
+
 local function getInventorySize(proxy)
     local size = safeCall(proxy, "getInventorySize", nil)
     if type(size) == "number" and size > 0 then
@@ -1407,14 +1426,14 @@ local function countRodsFromInventory(proxy)
         local stack = getStackInSlot(proxy, side, slot)
         if type(stack) == "table" then
             local id = extractRodId(stack)
-            if id then
+            if isRodId(id) then
                 local count = tonumber(stack.size) or tonumber(stack.count) or 1
                 counts[id] = (counts[id] or 0) + math.max(count, 1)
                 total = total + math.max(count, 1)
             end
         end
     end
-    return counts, total, size
+    return counts, total, total
 end
 
 local function countRodsFromInventoryAllSides(proxy)
@@ -1434,7 +1453,7 @@ local function countRodsFromInventoryAllSides(proxy)
                 local stack = getStackInSlot(proxy, side, slot)
                 if type(stack) == "table" then
                     local id = extractRodId(stack)
-                    if id then
+                    if isRodId(id) then
                         local count = tonumber(stack.size) or tonumber(stack.count) or 1
                         counts[id] = (counts[id] or 0) + math.max(count, 1)
                         total = total + math.max(count, 1)
@@ -1448,7 +1467,7 @@ local function countRodsFromInventoryAllSides(proxy)
                 for _, stack in pairs(stacks) do
                     if type(stack) == "table" then
                         local id = extractRodId(stack)
-                        if id then
+                        if isRodId(id) then
                             local count = tonumber(stack.size) or tonumber(stack.count) or 1
                             counts[id] = (counts[id] or 0) + math.max(count, 1)
                             total = total + math.max(count, 1)
@@ -1461,7 +1480,7 @@ local function countRodsFromInventoryAllSides(proxy)
     if not found then
         return nil
     end
-    return counts, total, (maxSlots > 0 and maxSlots or total)
+    return counts, total, total
 end
 
 local function formatRodCounts(counts)
