@@ -1852,9 +1852,13 @@ local function detectReactorRodInfo(reactorNum, debugDump)
             return
         end
 
+        local dbgLines = {}
         local function dbg(s)
             if not debugDump then return end
-            message(tostring(s), colors.msginfo, 34)
+            local line = tostring(s)
+            table.insert(dbgLines, line)
+            -- msgwarn заметнее в правом окне
+            message(line, colors.msgwarn, 34)
         end
 
         local function shortenRight(s, maxLen)
@@ -1876,6 +1880,8 @@ local function detectReactorRodInfo(reactorNum, debugDump)
             if rod.size ~= nil then table.insert(parts, "size=" .. tostring(rod.size)) end
             if rod.count ~= nil then table.insert(parts, "count=" .. tostring(rod.count)) end
             if rod.amount ~= nil then table.insert(parts, "amt=" .. tostring(rod.amount)) end
+            if rod.isEmpty ~= nil then table.insert(parts, "empty=" .. tostring(rod.isEmpty)) end
+            if rod.empty ~= nil then table.insert(parts, "empty2=" .. tostring(rod.empty)) end
 
             local maxN = nil
             for _, v in pairs(rod) do
@@ -1981,7 +1987,10 @@ local function detectReactorRodInfo(reactorNum, debugDump)
         -- PASS 2: считаем текущее кол-во.
         -- Предпочтительно — суммой rod.size/rod.count (это реальное число предметов в слотах),
         -- иначе (если мод не даёт count) — по занятым слотам * bestLevel.
-        for _, rod in ipairs(rods) do
+        local occByCount, occById, occByBigN = 0, 0, 0
+        local firstEmptyIdx = nil
+
+        for idx, rod in ipairs(rods) do
             if type(rod) == "table" then
                 local c = extractRodCount(rod)
                 local id = extractRodIdentity(rod)
@@ -1990,18 +1999,23 @@ local function detectReactorRodInfo(reactorNum, debugDump)
                 if c then
                     occupied = true
                     presentSum = presentSum + c
+                    occByCount = occByCount + 1
                 elseif id then
                     occupied = true
                     presentSum = presentSum + bestLevel
+                    occById = occById + 1
                 elseif rodHasLargeNumber(rod) then
                     -- HTC reactors часто возвращает числа топлива/ёмкости (20000/8000/4000),
                     -- даже если нет строкового ID. Это надёжный признак, что слот не пуст.
                     occupied = true
                     presentSum = presentSum + bestLevel
+                    occByBigN = occByBigN + 1
                 end
 
                 if occupied then
                     presentSlots = presentSlots + 1
+                elseif debugDump and not firstEmptyIdx then
+                    firstEmptyIdx = idx
                 end
 
                 if id then
@@ -2058,9 +2072,41 @@ local function detectReactorRodInfo(reactorNum, debugDump)
 
         if debugDump then
             dbg("DBG rods slots=" .. tostring(slotCount) .. " lvl=" .. tostring(bestLevel))
-            for i = 1, math.min(slotCount, 3) do
+            dbg("DBG occ count/id/bigN=" .. tostring(occByCount) .. "/" .. tostring(occById) .. "/" .. tostring(occByBigN))
+            for i = 1, math.min(slotCount, 4) do
                 dbg("DBG[" .. i .. "]: " .. shortenRight(summarizeRod(rods[i]), 34))
             end
+            if firstEmptyIdx then
+                dbg("DBG empty[" .. tostring(firstEmptyIdx) .. "]: " .. shortenRight(summarizeRod(rods[firstEmptyIdx]), 34))
+            end
+
+            -- Пишем расширенный дамп в файл, чтобы ничего не терялось в правом окне.
+            local okFile = pcall(function()
+                local path = "/home/rc_rods_dbg_" .. tostring(reactorNum) .. ".txt"
+                local f = io.open(path, "w")
+                if not f then return end
+                f:write("Reactor #" .. tostring(reactorNum) .. "\n")
+                f:write("slots=" .. tostring(slotCount) .. " level=" .. tostring(bestLevel) .. "\n")
+                f:write("occByCount=" .. tostring(occByCount) .. " occById=" .. tostring(occById) .. " occByBigN=" .. tostring(occByBigN) .. "\n\n")
+                local dumpN = math.min(slotCount, 12)
+                for i = 1, dumpN do
+                    f:write("[" .. i .. "] " .. summarizeRod(rods[i]) .. "\n")
+                    if type(rods[i]) == "table" then
+                        local keys = {}
+                        for k, v in pairs(rods[i]) do
+                            table.insert(keys, tostring(k) .. "=" .. tostring(v))
+                        end
+                        table.sort(keys)
+                        -- ограничим, чтобы файл не разрастался слишком сильно
+                        for j = 1, math.min(#keys, 40) do
+                            f:write("  " .. keys[j] .. "\n")
+                        end
+                    end
+                    f:write("\n")
+                end
+                f:close()
+                message("DBG сохранён: " .. path, colors.msgwarn, 34)
+            end)
         end
 
         if rodType ~= "-" and rodType ~= "нет" and rodType ~= "разные" then
