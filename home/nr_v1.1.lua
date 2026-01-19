@@ -1854,6 +1854,7 @@ local function detectReactorRodInfo(reactorNum)
 
         local slotCount = #rods
         local presentSlots = 0
+        local presentSum = 0
         local typeCounts = {}
         local multCounts = {}
         local levelCounts = {}
@@ -1876,26 +1877,23 @@ local function detectReactorRodInfo(reactorNum)
             levelCounts[n] = (levelCounts[n] or 0) + 1
         end
 
+        local function extractRodCount(rod)
+            if type(rod) ~= "table" then return nil end
+            local c = tonumber(rod.size) or tonumber(rod.count) or tonumber(rod.amount) or tonumber(rod.qty)
+            if c and c > 0 then return c end
+            return nil
+        end
+
+        -- PASS 1: определяем уровень (bestLevel) максимально устойчиво,
+        -- даже если в записи слота нет строк/ID.
         for _, rod in ipairs(rods) do
             if type(rod) == "table" then
-                local id = extractRodIdentity(rod)
-                if id then
-                    presentSlots = presentSlots + 1
-                    addType(id)
-
-                    -- уровень берём по моде среди маленьких чисел в записи rod[...] (включая строковые "6")
-                    for _, n in ipairs(collectSmallIntsOnce(rod)) do
-                        addLevelCandidate(n)
-                    end
-
-                    local strings = collectStrings(rod)
-                    for _, s in ipairs(strings) do
-                        local m = parseRodMultiplierFromText(s)
-                        if m then
-                            addMult(m)
-                            break
-                        end
-                    end
+                local c = extractRodCount(rod)
+                if c and c >= 2 and c <= 64 then
+                    addLevelCandidate(c)
+                end
+                for _, n in ipairs(collectSmallIntsOnce(rod)) do
+                    addLevelCandidate(n)
                 end
             end
         end
@@ -1912,8 +1910,48 @@ local function detectReactorRodInfo(reactorNum)
         if bestLevel < 1 then bestLevel = 1 end
         reactor_rodLevel[reactorNum] = bestLevel
 
-        local present = presentSlots * bestLevel
+        -- PASS 2: считаем текущее кол-во.
+        -- Предпочтительно — суммой rod.size/rod.count (это реальное число предметов в слотах),
+        -- иначе (если мод не даёт count) — по занятым слотам * bestLevel.
+        for _, rod in ipairs(rods) do
+            if type(rod) == "table" then
+                local c = extractRodCount(rod)
+                local id = extractRodIdentity(rod)
+
+                local occupied = false
+                if c then
+                    occupied = true
+                    presentSum = presentSum + c
+                elseif id then
+                    occupied = true
+                    presentSum = presentSum + bestLevel
+                end
+
+                if occupied then
+                    presentSlots = presentSlots + 1
+                end
+
+                if id then
+                    addType(id)
+
+                    local strings = collectStrings(rod)
+                    for _, s in ipairs(strings) do
+                        local m = parseRodMultiplierFromText(s)
+                        if m then
+                            addMult(m)
+                            break
+                        end
+                    end
+                end
+            end
+        end
+
         local expected = slotCount * bestLevel
+        local present = tonumber(presentSum) or 0
+        -- защита от выхода за пределы
+        if present < 0 then present = 0 end
+        if expected < 0 then expected = 0 end
+        if present > expected then present = expected end
 
         local bestType, bestTypeCount = nil, 0
         local distinctTypes = 0
@@ -1932,7 +1970,7 @@ local function detectReactorRodInfo(reactorNum)
         end
 
         local rodType
-        if presentSlots == 0 then
+        if present == 0 then
             rodType = "нет"
         elseif distinctTypes > 1 then
             rodType = "разные"
