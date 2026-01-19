@@ -1,20 +1,78 @@
 -- Reactor Control v1.1 build 3
 
 -- ----------------------------------------------------------------------------------------------------
-local computer = require("computer")
-local image = require("image")
-local buffer = require("doubleBuffering")
-local shell = require("shell")
-local event = require("event")
-local component = require("component")
-local fs = require("filesystem")
-local term = require("term")
-local unicode = require("unicode")
-local bit = require("bit32")
+local ok_computer, computer = pcall(require, "computer")
+if not ok_computer then
+    io.stderr:write("Ошибка загрузки computer: " .. tostring(computer) .. "\n")
+    return
+end
+
+local ok_image, image = pcall(require, "image")
+if not ok_image then
+    io.stderr:write("Ошибка загрузки image: " .. tostring(image) .. "\n")
+    return
+end
+
+local ok_buffer, buffer = pcall(require, "doubleBuffering")
+if not ok_buffer then
+    io.stderr:write("Ошибка загрузки doubleBuffering: " .. tostring(buffer) .. "\n")
+    return
+end
+
+local ok_shell, shell = pcall(require, "shell")
+if not ok_shell then
+    io.stderr:write("Ошибка загрузки shell: " .. tostring(shell) .. "\n")
+    return
+end
+
+local ok_event, event = pcall(require, "event")
+if not ok_event then
+    io.stderr:write("Ошибка загрузки event: " .. tostring(event) .. "\n")
+    return
+end
+
+local ok_component, component = pcall(require, "component")
+if not ok_component then
+    io.stderr:write("Ошибка загрузки component: " .. tostring(component) .. "\n")
+    return
+end
+
+local ok_fs, fs = pcall(require, "filesystem")
+if not ok_fs then
+    io.stderr:write("Ошибка загрузки filesystem: " .. tostring(fs) .. "\n")
+    return
+end
+
+local ok_term, term = pcall(require, "term")
+if not ok_term then
+    io.stderr:write("Ошибка загрузки term: " .. tostring(term) .. "\n")
+    return
+end
+
+local ok_unicode, unicode = pcall(require, "unicode")
+if not ok_unicode then
+    io.stderr:write("Ошибка загрузки unicode: " .. tostring(unicode) .. "\n")
+    return
+end
+
+local ok_bit, bit = pcall(require, "bit32")
+if not ok_bit then
+    io.stderr:write("Ошибка загрузки bit32: " .. tostring(bit) .. "\n")
+    return
+end
 -- ----------------------------------------------------------------------------------------------------
 
-buffer.setResolution(160, 50)
-buffer.clear(0x000000)
+local ok1, err1 = pcall(function() buffer.setResolution(160, 50) end)
+if not ok1 then
+    io.stderr:write("Ошибка buffer.setResolution: " .. tostring(err1) .. "\n")
+    return
+end
+
+local ok2, err2 = pcall(function() buffer.clear(0x000000) end)
+if not ok2 then
+    io.stderr:write("Ошибка buffer.clear: " .. tostring(err2) .. "\n")
+    return
+end
 
 local lastTime = computer.uptime()
 local exit = false
@@ -428,10 +486,22 @@ local function initReactors()
     reactor_address = {}
     reactors_proxy = {}
 
-    for address, ctype in component.list("htc_reactors") do
+    local ok, iter = pcall(component.list, "htc_reactors")
+    if not ok then
+        io.stderr:write("Ошибка component.list: " .. tostring(iter) .. "\n")
+        return
+    end
+
+    for address, ctype in iter do
         reactors = reactors + 1
         reactor_address[reactors] = address
-        reactors_proxy[reactors] = component.proxy(address)
+        local proxy_ok, proxy = pcall(component.proxy, address)
+        if proxy_ok then
+            reactors_proxy[reactors] = proxy
+        else
+            io.stderr:write("Ошибка component.proxy для " .. address .. ": " .. tostring(proxy) .. "\n")
+            reactors_proxy[reactors] = nil
+        end
         if reactors >= 12 then
             break
         end
@@ -447,16 +517,54 @@ local function initReactors()
 end
 
 local function initMe()
-    me_network = component.isAvailable("me_controller") or component.isAvailable("me_interface")
+    local ok, has_me = pcall(function()
+        return component.isAvailable("me_controller") or component.isAvailable("me_interface")
+    end)
+    if not ok then
+        io.stderr:write("Ошибка проверки МЭ: " .. tostring(has_me) .. "\n")
+        me_network = false
+        reason = "Ошибка проверки МЭ!"
+        return nil
+    end
+
+    me_network = has_me
     if me_network == true then
         if component.isAvailable("me_controller") then
-            local addr = component.list("me_controller")()
-            me_proxy = component.proxy(addr)
-            current_me_address = addr
+            local list_ok, addr = pcall(component.list, "me_controller")
+            if list_ok then
+                addr = addr()
+                local proxy_ok, proxy = pcall(component.proxy, addr)
+                if proxy_ok then
+                    me_proxy = proxy
+                    current_me_address = addr
+                else
+                    io.stderr:write("Ошибка proxy МЭ контроллера: " .. tostring(proxy) .. "\n")
+                    me_proxy = nil
+                    current_me_address = nil
+                end
+            else
+                io.stderr:write("Ошибка list МЭ контроллера: " .. tostring(addr) .. "\n")
+                me_proxy = nil
+                current_me_address = nil
+            end
         elseif component.isAvailable("me_interface") then
-            local addr = component.list("me_interface")()
-            me_proxy = component.proxy(addr)
-            current_me_address = addr
+            local list_ok, addr = pcall(component.list, "me_interface")
+            if list_ok then
+                addr = addr()
+                local proxy_ok, proxy = pcall(component.proxy, addr)
+                if proxy_ok then
+                    me_proxy = proxy
+                    current_me_address = addr
+                else
+                    io.stderr:write("Ошибка proxy МЭ интерфейса: " .. tostring(proxy) .. "\n")
+                    me_proxy = nil
+                    current_me_address = nil
+                end
+            else
+                io.stderr:write("Ошибка list МЭ интерфейса: " .. tostring(addr) .. "\n")
+                me_proxy = nil
+                current_me_address = nil
+            end
         else
             me_proxy = nil
             current_me_address = nil
@@ -1228,7 +1336,11 @@ local function drawStatic()
     end
 
     if picture then
-        buffer.drawImage(1, 1, picture)
+        local ok, err = pcall(function() buffer.drawImage(1, 1, picture) end)
+        if not ok then
+            buffer.drawText(1, 1, colors.msgerror, "Ошибка рисования изображения: " .. tostring(err))
+            return
+        end
     else
         buffer.drawText(1, 1, colors.msgerror, "Ошибка загрузки изображения! Проверьте наличие файлов 'image/reactorGUI.pic'")
         return
