@@ -2,7 +2,7 @@
 -- Author: Flixmo
 
 ------------------------------------ config ------------------------------------
-local REPOSITORY  = "https://raw.githubusercontent.com/vobelo571/ReactorControlMC/refs/heads/main/"
+local REPOSITORY  = "https://raw.githubusercontent.com/Flixmo/Reactor-Control-for-OpenComputers/refs/heads/main/"
 
 local filesToDownload = {
   {url = REPOSITORY.."home/nr_v1.1.lua",                path="/home/main.lua"},
@@ -89,7 +89,7 @@ local function drawChrome()
   frame(X,Y,W,H)
   -- title
   text(X+2, Y, "┤ "..appTitle.." ├", COL_TEXT)
-  text(X+W-20, Y, "[by vobelo571]", COL_DIM)
+  text(X+W-20, Y, "[by Flixmo]", COL_DIM)
   -- логотип
   text(X+W-15, Y+1, "☢ REACTOR", COL_WARN)
   -- секции
@@ -171,7 +171,7 @@ local function install()
     writeStatus("Completed with errors. Check log.", COL_WARN)
   end
 
-  text(X+2, Y+H-2, "by vobelo571 | Reactor Control Updater", COL_DIM)
+  text(X+2, Y+H-2, "by Flixmo | Reactor Control Updater", COL_DIM)
 
   if rebootAfter then
     for n=5,1,-1 do
