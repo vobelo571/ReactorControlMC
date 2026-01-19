@@ -93,9 +93,13 @@ local reactor_rf         = {}
 local reactor_depletionTime = {}
 local reactor_ConsumptionPerSecond = {}
 local last_me_address = nil
+local current_me_address = nil
 local me_network = false
 local me_proxy = nil
 local maxThreshold = 10^12
+local users = {}
+local theme = 0
+local debugLog = false
 local reason = nil
 local depletionTime = 0
 local consumeSecond = 0
@@ -426,7 +430,9 @@ local function initReactors()
         reactors = reactors + 1
         reactor_address[reactors] = address
         reactors_proxy[reactors] = component.proxy(address)
-        if reactors >= 12 then
+        if not reactors_proxy[reactors] then
+            reactors = reactors - 1
+        elseif reactors >= 12 then
             break
         end
     end
@@ -435,6 +441,9 @@ local function initReactors()
         temperature[i] = 0
         reactor_aborted[i] = false
         reactor_depletionTime[i] = 0
+        reactor_ConsumptionPerSecond[i] = 0
+        reactor_type[i] = "Air"
+        reactor_work[i] = false
     end
 end
 
@@ -2786,13 +2795,14 @@ local function mainLoop()
     -- Очищаем массивы вместо сброса каждого элемента.
     -- Это более надежно, так как гарантирует, что в массивах не останется старых данных.
     reactor_work = {}
-    temperature = {}
     reactor_type = {}
     reactor_address = {}
     reactor_aborted = {}
     reactors_proxy = {}
     reactor_rf = {}
+    temperature = {}
     reactor_depletionTime = {}
+    reactor_ConsumptionPerSecond = {}
     
     me_proxy = nil
     me_network = false
@@ -2801,6 +2811,10 @@ local function mainLoop()
     second = 0
     minute = 0
     hour = 0
+    MeSecond = 0
+    consumeSecond = 0
+    reason = nil
+    current_me_address = nil
     last_me_address = nil
 
     switchTheme(theme)
