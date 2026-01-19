@@ -1547,6 +1547,18 @@ local function normalizeFuelType(value)
     if key:find("ksir") or key:find("viz") then
         return "Ксирд.-Визамиум"
     end
+    if key:find("уран") then
+        return "Уран"
+    end
+    if key:find("мокс") or key:find("mox") then
+        return "MOX"
+    end
+    if key:find("калиф") then
+        return "Калифорний"
+    end
+    if key:find("ксир") or key:find("виз") then
+        return "Ксирд.-Визамиум"
+    end
     return nil
 end
 
@@ -1607,6 +1619,7 @@ local function updateRodData(num)
         local counts = nil
         local maxCount = 0
         local totalCount = 0
+        local usedInventory = false
         if proxy then
             reactor_level[i] = getReactorLevel(proxy) or 1
             counts, totalCount, maxCount = countRodsFromStatus(proxy)
@@ -1642,14 +1655,21 @@ local function updateRodData(num)
             end
             if invCounts ~= nil and (invTotal or 0) > 0 then
                 counts, totalCount, maxCount = invCounts, invTotal, invMax
+                usedInventory = true
             end
             if counts == nil or (next(counts) == nil and (totalCount or 0) == 0) then
                 counts, totalCount, maxCount = countRodsFromInventory(proxy)
+                if (totalCount or 0) > 0 then
+                    usedInventory = true
+                end
             end
             if counts == nil or (next(counts) == nil and (totalCount or 0) == 0) then
                 local aidx = reactor_adapter_index[i]
                 if aidx and adapters_proxy[aidx] then
                     counts, totalCount, maxCount = countRodsFromInventoryAllSides(adapters_proxy[aidx])
+                    if (totalCount or 0) > 0 then
+                        usedInventory = true
+                    end
                 end
             end
             if (counts == nil or (next(counts) == nil and (totalCount or 0) == 0)) and #adapters_proxy > 0 then
@@ -1671,11 +1691,14 @@ local function updateRodData(num)
                 if foundCount == 1 then
                     reactor_adapter_index[i] = foundIndex
                     counts, totalCount, maxCount = foundCounts, foundTotal, foundMax
+                    if (totalCount or 0) > 0 then
+                        usedInventory = true
+                    end
                 end
             end
         end
         local lvl = reactor_level[i] or 1
-        if lvl > 1 and (totalCount or 0) > 0 then
+        if not usedInventory and lvl > 1 and (totalCount or 0) > 0 then
             if type(counts) == "table" then
                 for id, c in pairs(counts) do
                     counts[id] = (tonumber(c) or 0) * lvl
