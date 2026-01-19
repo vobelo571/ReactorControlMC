@@ -118,6 +118,7 @@ local chatCommands = {
     ["@stop"] = true,
     ["@restart"] = true,
     ["@exit"] = true,
+    ["@changelog"] = true,
     ["@useradd"] = true,
     ["@userdel"] = true,
     ["@info"] = true
@@ -2052,9 +2053,10 @@ local function drawSettingsMenu()
     local sw1_pipePos = (sw1_state and (sw1_w - 2) or 1)   -- позиция (1 - лево, sw1_w-2 - право)
     drawSwitch(sw1_x, sw1_y, sw1_w, sw1_pipePos, sw1_state, nil, 0x777777, nil, 0x444444)
 
-    buffer.drawText(modalX + 3, modalY + 11, 0x000000, "Расширенное логирование")
-    animatedButton(1, modalX + 4, modalY + 12, "Включенно         ", nil, nil, 20, nil, nil, 0x444444, 0xffffff)
-    local sw3_x, sw3_y, sw3_w = modalX+16, modalY+13, 7
+
+    buffer.drawText(modalX + 3, modalY + 15, 0x000000, "Расширенное логирование")
+    animatedButton(1, modalX + 4, modalY + 16, "Включенно         ", nil, nil, 20, nil, nil, 0x444444, 0xffffff)
+    local sw3_x, sw3_y, sw3_w = modalX+16, modalY+17, 7
     local sw3_state = debugLog -- текущее состояние
     local sw3_pipePos = (sw3_state and (sw3_w - 2) or 1)   -- позиция (1 - лево, sw3_w-2 - право)
     drawSwitch(sw3_x, sw3_y, sw3_w, sw3_pipePos, sw3_state, nil, 0x777777, nil, 0x444444)
@@ -2378,8 +2380,9 @@ local function drawInfoMenu()
     end
 
     local infoScrollPos = 0
+    local changelogScrollPos = 0
     local licenseScrollPos = 0
-    local section = 1 -- 1 - info, 2 - license
+    local section = 1 -- 1 - info, 2 - changelog, 3 - license
     local scrollPos = 0
     local maxScroll = 0
     local function drawScrollText(x, y, w, h, text, pos)
@@ -2467,6 +2470,21 @@ local function drawInfoMenu()
         "Так-же автор не несёт ответственности за взрывы реакторов или иной ущерб, возникший в результате использования программы."
     }
 
+    local changelogText = {}
+    if changelog then
+        for _, entry in ipairs(changelog) do
+            -- Заголовок версии
+            table.insert(changelogText, "Версия " .. entry.version .. ":")
+            -- Добавляем все изменения этой версии
+            for _, line in ipairs(entry.changes) do
+                table.insert(changelogText, "- " .. line)
+            end
+            -- Пустая строка между версиями для читаемости
+            table.insert(changelogText, "")
+        end
+    else
+        changelogText = { "Ошибка загрузки changelog.lua!" }
+    end
 
     local licenseText = {
         "MIT License", 
@@ -2487,9 +2505,12 @@ local function drawInfoMenu()
     buffer.drawText(modalX + 19, modalY + 1, 0x000000, "Меню информации приложения ReactorControl v" .. version .. "." .. build)
     buffer.drawText(modalX + 5, modalY + 3, 0x111111, "Общая информация")
     buffer.drawRectangle(modalX + 4, modalY + 4, 18, 1, 0xcccccc, 0x8100cc, "⠉")
-
-    buffer.drawText(modalX + 32, modalY + 3, 0x111111, "MIT License")
-    buffer.drawRectangle(modalX + 31, modalY + 4, 13, 1, 0xcccccc, 0x666666, "⠉")
+    
+    buffer.drawText(modalX + 32, modalY + 3, 0x111111, "Изменения в версиях")
+    buffer.drawRectangle(modalX + 31, modalY + 4, 21, 1, 0xcccccc, 0x666666, "⠉")
+    
+    buffer.drawText(modalX + 65, modalY + 3, 0x111111, "MIT License")
+    buffer.drawRectangle(modalX + 64, modalY + 4, 13, 1, 0xcccccc, 0x666666, "⠉")
 
     drawScrollText(modalX + 2, modalY + 5, modalW - 4, 29, infotext, 0)
 
@@ -2517,16 +2538,28 @@ local function drawInfoMenu()
                 scrollPos = 0
                 buffer.drawRectangle(modalX + 2, modalY + 5, modalW - 4, 29, 0xcccccc, 0, " ")
                 buffer.drawRectangle(modalX + 4, modalY + 4, 18, 1, 0xcccccc, 0x8100cc, "⠉")
-                buffer.drawRectangle(modalX + 31, modalY + 4, 13, 1, 0xcccccc, 0x666666, "⠉")
+                buffer.drawRectangle(modalX + 31, modalY + 4, 21, 1, 0xcccccc, 0x666666, "⠉")
+                buffer.drawRectangle(modalX + 64, modalY + 4, 13, 1, 0xcccccc, 0x666666, "⠉")
                 drawScrollText(modalX + 2, modalY + 5, modalW - 4, 29, infotext, 0)
                 buffer.drawChanges()
-            elseif x >= modalX + 32 and x <= modalX + 44 and y >= modalY + 3 and y <= modalY + 4 then
-                -- MIT License
+            elseif x >= modalX + 32 and x <= modalX + 52 and y >= modalY + 3 and y <= modalY + 4 then
+                -- Изменения в версиях
                 section = 2
                 scrollPos = 0
                 buffer.drawRectangle(modalX + 2, modalY + 5, modalW - 4, 29, 0xcccccc, 0, " ")
                 buffer.drawRectangle(modalX + 4, modalY + 4, 18, 1, 0xcccccc, 0x666666, "⠉")
-                buffer.drawRectangle(modalX + 31, modalY + 4, 13, 1, 0xcccccc, 0x8100cc, "⠉")
+                buffer.drawRectangle(modalX + 31, modalY + 4, 21, 1, 0xcccccc, 0x8100cc, "⠉")
+                buffer.drawRectangle(modalX + 64, modalY + 4, 13, 1, 0xcccccc, 0x666666, "⠉")
+                drawScrollText(modalX + 2, modalY + 5, modalW - 4, 29, changelogText, 0)
+                buffer.drawChanges()
+            elseif x >= modalX + 65 and x <= modalX + 77 and y >= modalY + 3 and y <= modalY + 4 then
+                -- MIT License
+                section = 3
+                scrollPos = 0
+                buffer.drawRectangle(modalX + 2, modalY + 5, modalW - 4, 29, 0xcccccc, 0, " ")
+                buffer.drawRectangle(modalX + 4, modalY + 4, 18, 1, 0xcccccc, 0x666666, "⠉")
+                buffer.drawRectangle(modalX + 31, modalY + 4, 21, 1, 0xcccccc, 0x666666, "⠉")
+                buffer.drawRectangle(modalX + 64, modalY + 4, 13, 1, 0xcccccc, 0x8100cc, "⠉")
                 drawScrollText(modalX + 2, modalY + 5, modalW - 4, 29, licenseText, 0)
                 buffer.drawChanges()
             end
@@ -2601,6 +2634,7 @@ local function handleChatCommand(nick, msg, args)
             chatBox.say("§a@stop - остановка всех реакторов (или @stop 1 для остановки только 1-го)")
             chatBox.say("§a@exit - выход из программы")
             chatBox.say("§a@restart - перезагрузка компьютера")
+            chatBox.say("§a@changelog - показать изменения в обновлениях(пример: @changelog 1.1.1)") -- Скачивается массив из гитхаба в массиве ченджлог выглядит так {"1.0.0 - описание, переносы строк и тп, все учитывать и выводить в чат","1.0.1 - описание","1.1.0 - описание"}
         end
         
     elseif msg:match("^@status") then
@@ -2701,7 +2735,9 @@ local function handleChatCommand(nick, msg, args)
             chatBox.say("§bReactor Control v" .. version .. " Build " .. build)
             chatBox.say("§aАвтор: §eFlixmo")
             chatBox.say("§aGitHub: §1https://github.com/Flixmo/Reactor-Control-for-OpenComputers")
+            chatBox.say("§aПоддержать автора на §6Boosty: §1https://boosty.to/p1kachu337")
             chatBox.say("§aИгроки с доступом: §5" .. table.concat(users, ", "))
+            chatBox.say("§aСпасибо за использование программы!")
         end
     elseif msg == "@exit" then
         if isChatBox then
@@ -2763,6 +2799,35 @@ local function handleChatCommand(nick, msg, args)
             chatBox.say("§aИспользование: @userdel <ник>")
         end
 
+    elseif msg:match("^@changelog") then
+        local versionReq = args:match("^(%S+)")
+        if not changelog then
+            chatBox.say("§cОшибка загрузки changelog.lua!")
+            return
+        end
+
+        if versionReq then
+            local found = false
+            for _, entry in ipairs(changelog) do
+                if entry.version == versionReq then
+                    chatBox.say("§eИзменения в версии " .. entry.version .. ":")
+                    for _, line in ipairs(entry.changes) do
+                        chatBox.say("§a- " .. line)
+                    end
+                    found = true
+                    break
+                end
+            end
+            if not found then
+                chatBox.say("§cВерсия " .. versionReq .. " не найдена в ченджлоге!")
+            end
+        else
+            chatBox.say("§eДоступные версии:")
+            for _, entry in ipairs(changelog) do
+                chatBox.say("§a" .. entry.version)
+            end
+            chatBox.say("§aИспользуйте: @changelog <версия>")
+        end
 
     elseif msg == "@restart" then
         if isChatBox then
@@ -3370,9 +3435,6 @@ local function mainLoop()
             end
             drawTimeInfo()
             drawWidgets()
-        end
-        if supportersText then
-            drawMarquee(124, 6, supportersText ..  "                            ", 0xF15F2C)
         end
         local eventData = {event.pull(0.05)}
         local eventType = eventData[1]
