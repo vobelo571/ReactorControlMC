@@ -1854,7 +1854,8 @@ local function detectReactorRodInfo(reactorNum)
 
         local slotCount = #rods
         local presentSlots = 0
-        local presentSum = 0
+        local presentSum = 0 -- сумма точных count (если count известен)
+        local presentCountSlots = 0 -- сколько занятых слотов дали точный count
         local typeCounts = {}
         local multCounts = {}
         local levelCounts = {}
@@ -1931,9 +1932,61 @@ local function detectReactorRodInfo(reactorNum)
             return false
         end
 
+        local function analyzeEntry(entry)
+            local t = type(entry)
+            local out = {
+                occupied = false,
+                count = nil, -- 1..64
+                id = nil,
+                strings = nil
+            }
+
+            if t == "table" then
+                out.count = extractRodCountLimited(entry)
+                out.id = extractRodIdentity(entry)
+                out.strings = collectStrings(entry)
+
+                if out.count and out.count > 0 then
+                    out.occupied = true
+                elseif out.id then
+                    out.occupied = true
+                elseif rodHasLargeNumber(entry) or rodLooksNonEmpty(entry) then
+                    out.occupied = true
+                end
+            elseif t == "number" then
+                local n = tonumber(entry)
+                if n and n % 1 == 0 then
+                    if n >= 1 and n <= 64 then
+                        out.count = n
+                        out.occupied = (n > 0)
+                    elseif n > 64 then
+                        out.occupied = true
+                    end
+                    if n >= 2 and n <= 64 then
+                        -- может быть уровнем/размером стака
+                        addLevelCandidate(n)
+                    end
+                end
+            elseif t == "string" then
+                local s = tostring(entry)
+                if s ~= "" then
+                    out.occupied = true
+                    out.strings = { s }
+                    if s:find(":") then
+                        out.id = s
+                    end
+                end
+            elseif t == "boolean" then
+                out.occupied = (entry == true)
+            end
+
+            return out
+        end
+
         -- PASS 1: максимально устойчиво определяем уровень (stack size per slot)
         for _, rod in ipairs(rods) do
-            if type(rod) == "table" then
+            local rt = type(rod)
+            if rt == "table" then
                 local c = extractRodCountLimited(rod)
                 if c and c >= 2 and c <= 64 then
                     addLevelCandidate(c)
@@ -1941,6 +1994,13 @@ local function detectReactorRodInfo(reactorNum)
                 for _, n in ipairs(collectSmallIntsOnce(rod)) do
                     addLevelCandidate(n)
                 end
+            elseif rt == "number" then
+                addLevelCandidate(rod)
+            elseif rt == "string" then
+                -- вытащим мелкие числа из строки (редко, но бывает "6")
+                local s = tostring(rod)
+                local n = tonumber(s)
+                if n then addLevelCandidate(n) end
             end
         end
 
@@ -1949,37 +2009,23 @@ local function detectReactorRodInfo(reactorNum)
         -- - иначе: занятый слот считаем как full-stack (bestLevel)
         -- “занятость” определяем по: ID/label/name/любым данным в слоте/большим числам (топливо 20000 и т.п.)
         for _, rod in ipairs(rods) do
-            if type(rod) == "table" then
-                local c = extractRodCountLimited(rod)
-                local id = extractRodIdentity(rod)
-                local occupied = false
-
-                if c and c > 0 then
-                    occupied = true
-                    presentSum = presentSum + c
-                elseif id then
-                    occupied = true
-                    -- если мод не даёт count, считаем слот заполненным под уровень реактора
-                    -- (это лучше, чем считать 0)
-                    -- bestLevel определим ниже; пока добавим временно 0, до вычисления bestLevel
-                    -- (после bestLevel будет пересчитано во второй фазе ниже)
-                elseif rodHasLargeNumber(rod) or rodLooksNonEmpty(rod) then
-                    occupied = true
-                end
-
-                if occupied then
-                    presentSlots = presentSlots + 1
-                end
-
-                if id then
-                    addType(id)
-                    local strings = collectStrings(rod)
-                    for _, s in ipairs(strings) do
-                        local m = parseRodMultiplierFromText(s)
-                        if m then
-                            addMult(m)
-                            break
-                        end
+            local a = analyzeEntry(rod)
+            if a.occupied then
+                presentSlots = presentSlots + 1
+            end
+            if a.count and a.count > 0 then
+                presentSum = presentSum + a.count
+                presentCountSlots = presentCountSlots + 1
+            end
+            if a.id then
+                addType(a.id)
+            end
+            if a.strings then
+                for _, s in ipairs(a.strings) do
+                    local m = parseRodMultiplierFromText(s)
+                    if m then
+                        addMult(m)
+                        break
                     end
                 end
             end
@@ -1998,26 +2044,11 @@ local function detectReactorRodInfo(reactorNum)
         reactor_rodLevel[reactorNum] = bestLevel
 
         local expected = slotCount * bestLevel
-        -- Если count не найден по слотам, presentSum пока 0 — досчитаем по занятым слотам * bestLevel.
-        -- Также досчитаем “пустые по count” занятые слоты: в PASS2 мы их только отметили как occupied.
-        if presentSum <= 0 and presentSlots > 0 then
-            presentSum = presentSlots * bestLevel
-        else
-            -- добавим full-stack за занятые слоты, где count не удалось извлечь
-            -- (пример: есть fuel=20000, но нет size/count)
-            local minBySlots = presentSlots * 1
-            if presentSum < minBySlots then
-                -- если почему-то count дал меньше числа занятых слотов (редко), не ломаемся
-                presentSum = minBySlots
-            end
-            local maxFull = presentSlots * bestLevel
-            if presentSum < maxFull then
-                -- добьём до full-stack только если у нас нет точного count на занятых слотах
-                -- чтобы не завышать, добавляем только разницу до full-stack, если slot-based оценка выше
-                -- (это консервативный компромисс без знания “частичных” стаков)
-                -- однако если count действительно точный, он обычно уже == maxFull
-            end
-        end
+        -- Досчитываем слоты, где count не удалось извлечь:
+        -- total = sum(точных count) + (occupiedSlots - slotsWithCount) * level
+        local missingCountSlots = presentSlots - presentCountSlots
+        if missingCountSlots < 0 then missingCountSlots = 0 end
+        presentSum = presentSum + (missingCountSlots * bestLevel)
 
         local present = tonumber(presentSum) or 0
         -- защита от выхода за пределы
