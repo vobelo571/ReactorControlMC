@@ -792,9 +792,17 @@ local function drawWidgets()
                 rodLabel = unicode.sub(rodLabel, 1, 10) .. "..."
             end
             buffer.drawText(x + 4,  y + 7,  colors.textclr, "Стерж: " .. rodLabel)
-            animatedButton(1, x + 2,  y + 8, "Стержни", nil, nil, 6, nil, nil, 0x38afff)
-            animatedButton(1, x + 9,  y + 8, "Провер", nil, nil, 6, nil, nil, 0xffd900, 0x000000)
-            animatedButton(1, x + 16, y + 8, (reactor_work[i] and "Выкл" or "Вкл"), nil, nil, 6, nil, nil, (reactor_work[i] and 0xfd3232 or 0x2beb1a))
+
+            -- Компактные кнопки друг под другом (по 1 строке)
+            buffer.drawRectangle(x + 2, y + 8, 18, 1, 0x38afff, 0, " ")
+            buffer.drawText(x + 2, y + 8, 0xffffff, shortenNameCentered("Заказать стержни", 18))
+
+            buffer.drawRectangle(x + 2, y + 9, 18, 1, 0xffd900, 0, " ")
+            buffer.drawText(x + 2, y + 9, 0x000000, shortenNameCentered("Проверить", 18))
+
+            local btnColor = reactor_work[i] and 0xfd3232 or 0x2beb1a
+            buffer.drawRectangle(x + 2, y + 10, 18, 1, btnColor, 0, " ")
+            buffer.drawText(x + 2, y + 10, 0x000000, shortenNameCentered((reactor_work[i] and "Отключить" or "Включить"), 18))
         else
             local x, y = widgetCoords[i][1], widgetCoords[i][2]
             buffer.drawRectangle(x + 1, y, 20, 11, colors.msgwarn, 0, " ")
@@ -1583,15 +1591,76 @@ local function updateMeProxy()
     end
 end
 
-local function isRodPresent(rod)
-    if type(rod) ~= "table" then return false end
-    if rod.name or rod.label then return true end
-    for _, v in ipairs(rod) do
-        if type(v) == "string" and v ~= "" then
-            return true
+local function collectStrings(tbl)
+    if type(tbl) ~= "table" then return {} end
+    local out, seen = {}, {}
+    for _, v in ipairs(tbl) do
+        if type(v) == "string" and v ~= "" and not seen[v] then
+            seen[v] = true
+            table.insert(out, v)
         end
     end
-    return false
+    for _, v in pairs(tbl) do
+        if type(v) == "string" and v ~= "" and not seen[v] then
+            seen[v] = true
+            table.insert(out, v)
+        end
+    end
+    return out
+end
+
+local function isGenericItemString(s)
+    s = tostring(s or ""):lower()
+    return (s == "" or s == "item" or s == "items" or s == "stack" or s == "slot")
+end
+
+local function extractRodIdentity(rod)
+    if type(rod) ~= "table" then return nil end
+
+    local name = rod.name
+    if type(name) == "string" and name:find(":") then
+        return name
+    end
+
+    local label = rod.label
+    if type(label) == "string" and not isGenericItemString(label) then
+        return label
+    end
+
+    local strings = collectStrings(rod)
+    -- сначала пытаемся найти modid:item
+    for _, s in ipairs(strings) do
+        if s:find(":") then
+            return s
+        end
+    end
+    -- затем любой не-генерик текст
+    for _, s in ipairs(strings) do
+        if not isGenericItemString(s) and unicode.len(s) >= 3 then
+            return s
+        end
+    end
+
+    return nil
+end
+
+local function isRodPresent(rod)
+    return extractRodIdentity(rod) ~= nil
+end
+
+local function normalizeRodType(idStr)
+    local s = tostring(idStr or ""):lower()
+    if s == "" then return nil end
+
+    -- наиболее частые паттерны по названию/идентификатору
+    if s:find("mox") then return "MOX" end
+    if s:find("calif") or s:find("califor") then return "Калифорний" end
+    if s:find("uran") or s:find("u%-?238") or s:find("u%-?235") then return "Уран" end
+    if s:find("xir") or s:find("xird") or s:find("vizam") or s:find("wizam") then
+        return "Ксирдалий-Визамиумное"
+    end
+
+    return nil
 end
 
 local function updateReactorRodsState(reactorNum)
@@ -1642,18 +1711,10 @@ local function detectReactorRodType(reactorNum)
     end
 
     for _, rod in ipairs(rods) do
-        if type(rod) == "table" and isRodPresent(rod) then
-            if rod.name and tostring(rod.name):find(":") then
-                add(rod.name)
-            elseif rod.label then
-                add(rod.label)
-            else
-                for _, v in ipairs(rod) do
-                    if type(v) == "string" and v ~= "" then
-                        add(v)
-                        break
-                    end
-                end
+        if type(rod) == "table" then
+            local id = extractRodIdentity(rod)
+            if id then
+                add(id)
             end
         end
     end
@@ -1673,7 +1734,7 @@ local function detectReactorRodType(reactorNum)
     elseif distinct > 1 then
         result = "разные"
     else
-        result = bestName
+        result = normalizeRodType(bestName) or bestName
     end
 
     reactor_rodType[reactorNum] = result
@@ -3262,42 +3323,20 @@ local function handleTouch(x, y, uuid)
     for i = 1, reactors do
         if reactor_aborted[i] == false then
             local xw, yw = widgetCoords[i][1], widgetCoords[i][2]
-            if y >= (yw + 9) and y <= (yw + 10) then
-                -- Левая кнопка: заказать стержни
-                if x >= (xw + 2) and x <= (xw + 7) then
-                    buffer.drawRectangle(xw + 1, yw + 8, 21, 3, colors.bg, 0, " ")
-                    animatedButton(1, xw + 2, yw + 8, "Стержни", nil, nil, 6, nil, nil, 0x2f8cff)
-                    animatedButton(2, xw + 2, yw + 8, "Стержни", nil, nil, 6, nil, nil, 0x2f8cff)
-                    buffer.drawChanges()
+            if x >= (xw + 2) and x <= (xw + 19) then
+                if y == (yw + 8) then
                     orderRodsForReactor(i)
-                    os.sleep(0.2)
+                    os.sleep(0.15)
                     drawWidgets()
                     break
-                end
-
-                -- Средняя кнопка: проверить тип стержней
-                if x >= (xw + 9) and x <= (xw + 14) then
-                    buffer.drawRectangle(xw + 1, yw + 8, 21, 3, colors.bg, 0, " ")
-                    animatedButton(1, xw + 9, yw + 8, "Провер", nil, nil, 6, nil, nil, 0xffd900, 0x000000)
-                    animatedButton(2, xw + 9, yw + 8, "Провер", nil, nil, 6, nil, nil, 0xffd900, 0x000000)
-                    buffer.drawChanges()
+                elseif y == (yw + 9) then
                     detectReactorRodType(i)
-                    os.sleep(0.2)
+                    os.sleep(0.15)
                     drawWidgets()
                     break
-                end
-
-                -- Правая кнопка: включить/выключить
-                if x >= (xw + 16) and x <= (xw + 21) then
+                elseif y == (yw + 10) then
                     local Rnum = i
-
-                    buffer.drawRectangle(xw + 1, yw + 8, 21, 3, colors.bg, 0, " ")
-                    animatedButton(1, xw + 16, yw + 8, (reactor_work[Rnum] and "Выкл" or "Вкл"), nil, nil, 6, nil, nil, (reactor_work[Rnum] and 0xfb3737 or 0x61ff52))
-                    animatedButton(2, xw + 16, yw + 8, (reactor_work[Rnum] and "Выкл" or "Вкл"), nil, nil, 6, nil, nil, (reactor_work[Rnum] and 0xfb3737 or 0x61ff52))
-                    buffer.drawChanges()
-
                     drawStatus(Rnum)
-
                     if reactor_work[Rnum] then
                         stop(Rnum)
                         updateReactorData(Rnum)
@@ -3306,14 +3345,11 @@ local function handleTouch(x, y, uuid)
                         starting = true
                         updateReactorData(Rnum)
                     end
-
                     if not any_reactor_on then
                         work = false
                         starting = false
                     end
-
-                    os.sleep(0.2)
-                    animatedButton(1, xw + 16, yw + 8, (reactor_work[Rnum] and "Выкл" or "Вкл"), nil, nil, 6, nil, nil, (reactor_work[Rnum] and 0xfd3232 or 0x2beb1a))
+                    os.sleep(0.15)
                     drawWidgets()
                     break
                 end
