@@ -107,6 +107,7 @@ local reactor_level = {}
 local adapters_proxy = {}
 local adapters_address = {}
 local reactor_adapter_index = {}
+local reactor_rod_source = {}
 local last_me_address = nil
 local me_network = false
 local me_proxy = nil
@@ -211,39 +212,6 @@ local rod_aliases = {
     ["quad_californium_fuel_rod"] = "htc_reactors:quad_californium_fuel_rod",
     ["quad_ksirviz_fuel_rod"] = "htc_reactors:quad_ksirviz_fuel_rod",
 }
-
-local function normalizeRodIdFromString(value)
-    if type(value) ~= "string" then
-        return nil
-    end
-    local key = value:lower()
-    if not (key:find("rod") or key:find("fuel") or key:find("uran") or key:find("mox") or key:find("californium") or key:find("ksir") or key:find("viz")) then
-        return nil
-    end
-    if value:find(":") or value:find("%.") then
-        return value
-    end
-    key = key:gsub("%s+", "_")
-    key = key:gsub("[-]", "_")
-    if rod_aliases[key] then
-        return rod_aliases[key]
-    end
-    local hasQuad = key:find("quad") or key:find("x4") or key:find("4x")
-    local hasSixteen = key:find("sixteen") or key:find("x16") or key:find("16x") or key:find("16")
-    if key:find("uran") then
-        return hasSixteen and "htc_reactors:sixteen_uraium_fuel_rod" or (hasQuad and "htc_reactors:quad_uranium_fuel_rod" or value)
-    end
-    if key:find("mox") then
-        return hasSixteen and "htc_reactors:sixteen_mox_fuel_rod" or (hasQuad and "htc_reactors:quad_mox_fuel_rod" or value)
-    end
-    if key:find("californium") then
-        return "htc_reactors:quad_californium_fuel_rod"
-    end
-    if key:find("ksir") or key:find("viz") then
-        return "htc_reactors:quad_ksirviz_fuel_rod"
-    end
-    return value
-end
 
 local function brailleChar(dots)
     return unicode.char(
@@ -532,6 +500,7 @@ local function initReactors()
         reactor_rod_max[i] = 0
         reactor_rod_types[i] = "н/д"
         reactor_level[i] = 1
+        reactor_rod_source[i] = "none"
     end
 end
 
@@ -1285,18 +1254,48 @@ local function extractRodId(rod)
     if type(rod) ~= "table" then
         return nil
     end
+    local function normalizeToId(value)
+        if type(value) ~= "string" then
+            return nil
+        end
+        if value:find(":") then
+            return value
+        end
+        local key = value:lower()
+        key = key:gsub("%s+", "_")
+        key = key:gsub("[-]", "_")
+        if rod_aliases[key] then
+            return rod_aliases[key]
+        end
+        local hasQuad = key:find("quad") or key:find("x4") or key:find("4x")
+        local hasSixteen = key:find("sixteen") or key:find("x16") or key:find("16x") or key:find("16")
+        if key:find("uran") then
+            return hasSixteen and "htc_reactors:sixteen_uraium_fuel_rod" or (hasQuad and "htc_reactors:quad_uranium_fuel_rod" or nil)
+        end
+        if key:find("mox") then
+            return hasSixteen and "htc_reactors:sixteen_mox_fuel_rod" or (hasQuad and "htc_reactors:quad_mox_fuel_rod" or nil)
+        end
+        if key:find("californium") then
+            return "htc_reactors:quad_californium_fuel_rod"
+        end
+        if key:find("ksir") or key:find("viz") then
+            return "htc_reactors:quad_ksirviz_fuel_rod"
+        end
+        return nil
+    end
+
     local direct = {
         rod.name, rod.id, rod.item, rod.itemName, rod.itemId, rod.type,
         rod[1], rod[2], rod[3], rod[4], rod[5], rod[6], rod.stack, rod.itemStack
     }
     for _, value in ipairs(direct) do
-        local id = normalizeRodIdFromString(value)
+        local id = normalizeToId(value)
         if id then
             return id
         end
         if type(value) == "table" then
             local nested = value.name or value.id or value.item or value.itemName or value.itemId or value[1]
-            id = normalizeRodIdFromString(nested)
+            id = normalizeToId(nested)
             if id then
                 return id
             end
@@ -1304,13 +1303,13 @@ local function extractRodId(rod)
     end
 
     for _, value in pairs(rod) do
-        local id = normalizeRodIdFromString(value)
+        local id = normalizeToId(value)
         if id then
             return id
         end
         if type(value) == "table" then
             for _, v2 in pairs(value) do
-                id = normalizeRodIdFromString(v2)
+                id = normalizeToId(v2)
                 if id then
                     return id
                 end
@@ -1512,22 +1511,11 @@ local function formatRodTypes(counts)
     end
     for id, count in pairs(counts) do
         if not rod_types[id] and (tonumber(count) or 0) > 0 then
-            local short = tostring(id)
-            if short:find(":") then
-                short = short:match(":(.+)$") or short
-            elseif short:find("%.") then
-                short = short:match("%.(.+)$") or short
-            end
-            short = short:gsub("_", " ")
-            if not seen[short] then
-                table.insert(types, short)
-                seen[short] = true
-            end
             hasUnknown = true
         end
     end
     if hasUnknown then
-        -- неизвестные уже добавлены
+        table.insert(types, "Неизв.")
     end
     if #types == 0 then
         return "нет"
@@ -1586,6 +1574,97 @@ local function getFuelTypeLabel(proxy)
     return nil
 end
 
+local function extractCoordinates(value)
+    if type(value) ~= "table" then
+        return nil
+    end
+    local x = value.x or value[1]
+    local y = value.y or value[2]
+    local z = value.z or value[3]
+    if type(x) == "number" and type(y) == "number" and type(z) == "number" then
+        return {x = x, y = y, z = z}
+    end
+    return nil
+end
+
+local function getComponentCoordinates(proxy)
+    if not proxy then
+        return nil
+    end
+    local methods = {"getCoordinates", "getPosition", "getPos", "getLocation"}
+    for _, method in ipairs(methods) do
+        local coords = extractCoordinates(safeCall(proxy, method, nil))
+        if coords then
+            return coords
+        end
+    end
+    return nil
+end
+
+local function collectRbmkRodData()
+    local rodComponents = {"rbmk_fuel_rod", "rbmk_fuel_rod_reasim"}
+    local countsByReactor = {}
+    local totalByReactor = {}
+    local maxByReactor = {}
+    local reactorCoords = {}
+    local hasCoords = false
+    for i = 1, reactors do
+        countsByReactor[i] = {}
+        totalByReactor[i] = 0
+        maxByReactor[i] = 0
+        reactorCoords[i] = getComponentCoordinates(reactors_proxy[i])
+        if reactorCoords[i] then
+            hasCoords = true
+        end
+    end
+    local found = false
+    for _, ctype in ipairs(rodComponents) do
+        for address in component.list(ctype) do
+            found = true
+            local rproxy = component.proxy(address)
+            local rodId = extractRodId({
+                name = safeCall(rproxy, "getType", nil),
+                type = safeCall(rproxy, "getType", nil),
+                info = safeCall(rproxy, "getInfo", nil),
+                id = safeCall(rproxy, "getRodType", nil)
+            })
+            local idx = 1
+            if reactors > 1 and hasCoords then
+                local rc = getComponentCoordinates(rproxy)
+                if rc then
+                    local best = nil
+                    local bestDist = nil
+                    for i = 1, reactors do
+                        local c = reactorCoords[i]
+                        if c then
+                            local dx = c.x - rc.x
+                            local dy = c.y - rc.y
+                            local dz = c.z - rc.z
+                            local dist = dx * dx + dy * dy + dz * dz
+                            if not bestDist or dist < bestDist then
+                                bestDist = dist
+                                best = i
+                            end
+                        end
+                    end
+                    if best then
+                        idx = best
+                    end
+                end
+            end
+            if rodId then
+                countsByReactor[idx][rodId] = (countsByReactor[idx][rodId] or 0) + 1
+            end
+            totalByReactor[idx] = (totalByReactor[idx] or 0) + 1
+            maxByReactor[idx] = (maxByReactor[idx] or 0) + 1
+        end
+    end
+    if not found then
+        return nil
+    end
+    return countsByReactor, totalByReactor, maxByReactor
+end
+
 local function getReactorLevel(proxy)
     if not proxy then
         return 1
@@ -1606,126 +1685,35 @@ local function getReactorLevel(proxy)
     return 1
 end
 
-local function extractCoordinates(value)
-    if type(value) ~= "table" then
-        return nil
-    end
-    local x = value.x or value[1]
-    local y = value.y or value[2]
-    local z = value.z or value[3]
-    if type(x) == "number" and type(y) == "number" and type(z) == "number" then
-        return {x = x, y = y, z = z}
-    end
-    return nil
-end
-
-local function getReactorCoordinates(proxy)
-    if not proxy then
-        return nil
-    end
-    local methods = {"getCoordinates", "getPosition", "getPos", "getLocation"}
-    for _, method in ipairs(methods) do
-        local coords = extractCoordinates(safeCall(proxy, method, nil))
-        if coords then
-            return coords
-        end
-    end
-    return nil
-end
-
-local function getRbmkRodType(proxy)
-    if not proxy then
-        return nil
-    end
-    local t = safeCall(proxy, "getType", nil)
-    if type(t) == "string" then
-        return t
-    end
-    local info = safeCall(proxy, "getInfo", nil)
-    if type(info) == "table" then
-        local v = info[8] or info.type or info.name
-        if type(v) == "string" then
-            return v
-        end
-    end
-    return nil
-end
-
-local function collectRbmkRodData()
-    local rodComponents = {"rbmk_fuel_rod", "rbmk_fuel_rod_reasim"}
-    local countsByReactor = {}
-    local totalByReactor = {}
-    local maxByReactor = {}
-    local coordsByReactor = {}
-    local hasCoords = false
-    for i = 1, reactors do
-        countsByReactor[i] = {}
-        totalByReactor[i] = 0
-        maxByReactor[i] = 0
-        coordsByReactor[i] = getReactorCoordinates(reactors_proxy[i])
-        if coordsByReactor[i] then
-            hasCoords = true
-        end
-    end
-    local found = false
-    for _, ctype in ipairs(rodComponents) do
-        for address in component.list(ctype) do
-            found = true
-            local rproxy = component.proxy(address)
-            local id = normalizeRodIdFromString(getRbmkRodType(rproxy))
-            local idx = 1
-            if hasCoords then
-                local rc = extractCoordinates(safeCall(rproxy, "getCoordinates", nil))
-                if rc then
-                    local best = nil
-                    local bestDist = nil
-                    for i = 1, reactors do
-                        local c = coordsByReactor[i]
-                        if c then
-                            local dx = c.x - rc.x
-                            local dy = c.y - rc.y
-                            local dz = c.z - rc.z
-                            local dist = dx * dx + dy * dy + dz * dz
-                            if not bestDist or dist < bestDist then
-                                bestDist = dist
-                                best = i
-                            end
-                        end
-                    end
-                    if best then
-                        idx = best
-                    end
-                end
-            end
-            if id then
-                countsByReactor[idx][id] = (countsByReactor[idx][id] or 0) + 1
-            end
-            totalByReactor[idx] = (totalByReactor[idx] or 0) + 1
-            maxByReactor[idx] = (maxByReactor[idx] or 0) + 1
-        end
-    end
-    if not found then
-        return nil
-    end
-    return countsByReactor, totalByReactor, maxByReactor
-end
-
 local function updateRodData(num)
     for i = num or 1, num or reactors do
         local proxy = reactors_proxy[i]
         local counts = nil
         local maxCount = 0
         local totalCount = 0
+        local source = "none"
+        local rbmkCounts, rbmkTotal, rbmkMax = collectRbmkRodData()
+        if rbmkCounts and rbmkTotal and rbmkMax then
+            counts = rbmkCounts[i]
+            totalCount = rbmkTotal[i]
+            maxCount = rbmkMax[i]
+            source = "rbmk"
+        end
         if proxy then
             reactor_level[i] = getReactorLevel(proxy) or 1
-            counts, totalCount, maxCount = countRodsFromStatus(proxy)
+            if source == "none" then
+                counts, totalCount, maxCount = countRodsFromStatus(proxy)
+                source = "status"
+            end
             if counts == nil or (next(counts) == nil and (totalCount or 0) == 0) then
                 counts, totalCount, maxCount = countRodsFromInventory(proxy)
+                source = "inventory"
             end
             if counts == nil or (next(counts) == nil and (totalCount or 0) == 0) then
                 local aidx = reactor_adapter_index[i]
                 if aidx and adapters_proxy[aidx] then
                     counts, totalCount, maxCount = countRodsFromInventoryAllSides(adapters_proxy[aidx])
+                    source = "adapter"
                 end
             end
             if (counts == nil or (next(counts) == nil and (totalCount or 0) == 0)) and #adapters_proxy > 0 then
@@ -1747,19 +1735,12 @@ local function updateRodData(num)
                 if foundCount == 1 then
                     reactor_adapter_index[i] = foundIndex
                     counts, totalCount, maxCount = foundCounts, foundTotal, foundMax
-                end
-            end
-            if counts == nil or (next(counts) == nil and (totalCount or 0) == 0) then
-                local rbCounts, rbTotal, rbMax = collectRbmkRodData()
-                if rbCounts and rbTotal and rbMax then
-                    counts = rbCounts[i]
-                    totalCount = rbTotal[i]
-                    maxCount = rbMax[i]
+                    source = "adapter"
                 end
             end
         end
         local lvl = reactor_level[i] or 1
-        if lvl > 1 and (totalCount or 0) > 0 then
+        if source ~= "rbmk" and lvl > 1 and (totalCount or 0) > 0 then
             if type(counts) == "table" then
                 for id, c in pairs(counts) do
                     counts[id] = (tonumber(c) or 0) * lvl
@@ -1783,6 +1764,7 @@ local function updateRodData(num)
             reactor_rod_count[i] = totalCount
             reactor_rod_max[i] = maxCount
         end
+        reactor_rod_source[i] = source
     end
 end
 
@@ -3829,6 +3811,7 @@ local function mainLoop()
     reactor_rod_max = {}
     reactor_rod_types = {}
     reactor_level = {}
+    reactor_rod_source = {}
     reactor_rod_counts = {}
     reactor_rod_summary = {}
     
