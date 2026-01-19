@@ -1,78 +1,20 @@
 -- Reactor Control v1.1 build 3
 
 -- ----------------------------------------------------------------------------------------------------
-local ok_computer, computer = pcall(require, "computer")
-if not ok_computer then
-    io.stderr:write("Ошибка загрузки computer: " .. tostring(computer) .. "\n")
-    return
-end
-
-local ok_image, image = pcall(require, "image")
-if not ok_image then
-    io.stderr:write("Ошибка загрузки image: " .. tostring(image) .. "\n")
-    return
-end
-
-local ok_buffer, buffer = pcall(require, "doubleBuffering")
-if not ok_buffer then
-    io.stderr:write("Ошибка загрузки doubleBuffering: " .. tostring(buffer) .. "\n")
-    return
-end
-
-local ok_shell, shell = pcall(require, "shell")
-if not ok_shell then
-    io.stderr:write("Ошибка загрузки shell: " .. tostring(shell) .. "\n")
-    return
-end
-
-local ok_event, event = pcall(require, "event")
-if not ok_event then
-    io.stderr:write("Ошибка загрузки event: " .. tostring(event) .. "\n")
-    return
-end
-
-local ok_component, component = pcall(require, "component")
-if not ok_component then
-    io.stderr:write("Ошибка загрузки component: " .. tostring(component) .. "\n")
-    return
-end
-
-local ok_fs, fs = pcall(require, "filesystem")
-if not ok_fs then
-    io.stderr:write("Ошибка загрузки filesystem: " .. tostring(fs) .. "\n")
-    return
-end
-
-local ok_term, term = pcall(require, "term")
-if not ok_term then
-    io.stderr:write("Ошибка загрузки term: " .. tostring(term) .. "\n")
-    return
-end
-
-local ok_unicode, unicode = pcall(require, "unicode")
-if not ok_unicode then
-    io.stderr:write("Ошибка загрузки unicode: " .. tostring(unicode) .. "\n")
-    return
-end
-
-local ok_bit, bit = pcall(require, "bit32")
-if not ok_bit then
-    io.stderr:write("Ошибка загрузки bit32: " .. tostring(bit) .. "\n")
-    return
-end
+local computer = require("computer")
+local image = require("image")
+local buffer = require("doubleBuffering")
+local shell = require("shell")
+local event = require("event")
+local component = require("component")
+local fs = require("filesystem")
+local term = require("term")
+local unicode = require("unicode")
+local bit = require("bit32")
 -- ----------------------------------------------------------------------------------------------------
 
-local ok1, err1 = pcall(function() buffer.setResolution(160, 50) end)
-if not ok1 then
-    io.stderr:write("Ошибка buffer.setResolution: " .. tostring(err1) .. "\n")
-    return
-end
-
-local ok2, err2 = pcall(function() buffer.clear(0x000000) end)
-if not ok2 then
-    io.stderr:write("Ошибка buffer.clear: " .. tostring(err2) .. "\n")
-    return
-end
+buffer.setResolution(160, 50)
+buffer.clear(0x000000)
 
 local lastTime = computer.uptime()
 local exit = false
@@ -92,23 +34,18 @@ end
 if not fs.exists(dataFolder) then
     fs.makeDirectory(dataFolder)
 end
--- Инициализация переменных конфига
-local users = {}
-local usersold = {}
-local theme = false
-local debugLog = false
-local isFirstStart = true
-
 if not fs.exists(configPath) then
     local file = io.open(configPath, "w")
     if file then
         file:write("-- Конфигурация программы Reactor Control v" .. version .."\n")
         file:write("-- Прежде чем что-то изменять, пожалуйста внимательно читайте описание!\n\n")
+        file:write("porog = 50000 -- Минимальное значение порога жидкости в mB\n\n")
         file:write("-- Впишите никнеймы игроков которым будет разрешеннен доступ к ПК, обязательно ради вашей безопасности!\n")
-        file:write("users = {} -- Пример: {\"Flixmo\", \"Nickname1\"} -- Именно что с кавычками и запятыми!\n")
+        file:write("users = {} -- Пример: {\"P1KaChU337\", \"Nickname1\"} -- Именно что с кавычками и запятыми!\n")
         file:write("usersold = {} -- Не трогайте, может заблокировать ПК!\n\n")
         file:write("-- Тема интерфейса в системе по стандарту\n")
         file:write("theme = false -- (false темная, true светлая)\n\n")
+        file:write("updateCheck = true -- (false не проверять на наличие обновлений, true проверять обновления)\n\n")
         file:write("debugLog = false\n\n")
         file:write("isFirstStart = true\n\n")
         file:write("-- После внесение изменений сохраните данные (Ctrl+S) и выйдите из редактора (Ctrl+W)\n")
@@ -140,12 +77,15 @@ local minute = 0
 local hour = 0
 local testvalue = 0
 local rf = 0
+local fluidInMe = 0
+local ismechecked = false
 local flux_network = false
 local flux_checked = false
 
 local consoleLines = {}
 local work = false
 local starting = false
+local offFluid = false
 
 local reactor_work       = {}
 local reactor_aborted    = {}
@@ -154,13 +94,20 @@ local reactor_type       = {}
 local reactor_address    = {}
 local reactors_proxy     = {}
 local reactor_rf         = {}
+local reactor_getcoolant = {}
+local reactor_maxcoolant = {}
 local reactor_depletionTime = {}
+local reactor_ConsumptionPerSecond = {}
 local last_me_address = nil
 local me_network = false
 local me_proxy = nil
+local lastValidFluid = 0
+local maxThreshold = 10^12
 local reason = nil
 local depletionTime = 0
 local consumeSecond = 0
+local supportersText = nil
+local changelog = nil
 local MeSecond = 0
 
 local isChatBox = component.isAvailable("chat_box") or false
@@ -169,6 +116,7 @@ local chatThread = nil
 local chatCommands = {
     ["@help"] = true,
     ["@status"] = true,
+    ["@setporog"] = true,
     ["@start"] = true,
     ["@stop"] = true,
     ["@restart"] = true,
@@ -186,6 +134,7 @@ local widgetCoords = {
 }
 
 local config = {
+    clickArea19 = {x1=4,  y1=44, x2=9,  y2=46}, -- Кнопка 🔧 (x:5, y:44)
     clickArea20 = {x1=4,  y1=47, x2=9,  y2=49}, -- Кнопка ⓘ (x:5, y:47)
 
     clickArea1  = {x1=12,  y1=44, x2=37, y2=46}, -- Отключить реакторы (x:13, y:44)
@@ -210,6 +159,8 @@ local config = {
     clickArea17 = {x1=widgetCoords[11][1]+5, y1=widgetCoords[11][2]+9, x2=widgetCoords[11][1]+11, y2=widgetCoords[11][2]+10}, -- Реактор 11
     clickArea18 = {x1=widgetCoords[12][1]+5, y1=widgetCoords[12][2]+9, x2=widgetCoords[12][1]+11, y2=widgetCoords[12][2]+10}, -- Реактор 12
     -- Координаты для кнопок в правом меню
+    clickAreaPorogPlus = {x1=124, y1=36, x2=125, y2=33}, -- Кнопка "+ Порог"
+    clickAreaPorogMinus = {x1=126, y1=36, x2=127, y2=33} -- Кнопка "- Порог"
 }
 local colors = {
     bg = 0x202020,
@@ -320,6 +271,12 @@ local brail_console = {
     {0,0,1,1,0,0,0,0}
 }
 
+local brail_fluid = {
+    {0,1,0,1,1,1,1,1},
+    {1,0,1,0,1,1,1,1},
+    {1,1,0,1,0,0,0,0},
+    {1,1,1,0,0,0,0,0}
+}
 
 local brail_greenbtn = {
     {0,0,0,1,1,1,0,1},
@@ -413,6 +370,7 @@ local function saveCfg(param)
 
     file:write("-- Конфигурация программы Reactor Control v" .. version .."\n")
     file:write("-- Прежде чем что-то изменять, пожалуйста внимательно читайте описание!\n\n")
+    file:write(string.format("porog = %d -- Минимальное значение порога жидкости в mB\n\n", math.max(0, porog)))
     
     -- users
     file:write("-- Впишите никнеймы игроков которым будет разрешеннен доступ к ПК, обязательно ради вашей безопасности!\n")
@@ -423,7 +381,7 @@ local function saveCfg(param)
             file:write(", ")
         end
     end
-    file:write("} -- Пример: {\"Flixmo\", \"Nickname1\"} -- Именно что с кавычками и запятыми!\n")
+    file:write("} -- Пример: {\"P1KaChU337\", \"Nickname1\"} -- Именно что с кавычками и запятыми!\n")
 
     file:write("usersold = {")
     for i, user in ipairs(usersold) do
@@ -437,6 +395,7 @@ local function saveCfg(param)
     -- theme
     file:write("-- Тема интерфейса в системе по стандарту\n")
     file:write(string.format("theme = %s -- Тема интерфейса (false тёмная, true светлая)\n\n", tostring(theme)))
+    file:write(string.format("updateCheck = %s -- (false не проверять на наличие обновлений, true проверять обновления)\n\n", tostring(updateCheck)))
     file:write(string.format("debugLog = %s\n\n", tostring(debugLog)))
     file:write(string.format("isFirstStart = %s\n\n", tostring(isFirstStart)))
     file:write("-- После внесение изменений сохраните данные (Ctrl+S) и выйдите из редактора (Ctrl+W)\n")
@@ -486,90 +445,41 @@ local function initReactors()
     reactor_address = {}
     reactors_proxy = {}
 
-    local ok, iter = pcall(component.list, "htc_reactors")
-    if not ok then
-        io.stderr:write("Ошибка component.list: " .. tostring(iter) .. "\n")
-        return
-    end
-
-    for address, ctype in iter do
+    for address, ctype in component.list("htc_reactors") do
         reactors = reactors + 1
         reactor_address[reactors] = address
-        local proxy_ok, proxy = pcall(component.proxy, address)
-        if proxy_ok then
-            reactors_proxy[reactors] = proxy
-        else
-            io.stderr:write("Ошибка component.proxy для " .. address .. ": " .. tostring(proxy) .. "\n")
-            reactors_proxy[reactors] = nil
-        end
+        reactors_proxy[reactors] = component.proxy(address)
         if reactors >= 12 then
             break
         end
     end
     for i = 1, reactors do
         reactor_rf[i] = 0
+        reactor_getcoolant[i] = 0
+        reactor_maxcoolant[i] = 0
         temperature[i] = 0
         reactor_aborted[i] = false
         reactor_depletionTime[i] = 0
-        reactor_work[i] = false
-        reactor_type[i] = "Air"
     end
 end
 
 local function initMe()
-    local ok, has_me = pcall(function()
-        return component.isAvailable("me_controller") or component.isAvailable("me_interface")
-    end)
-    if not ok then
-        io.stderr:write("Ошибка проверки МЭ: " .. tostring(has_me) .. "\n")
-        me_network = false
-        reason = "Ошибка проверки МЭ!"
-        return nil
-    end
-
-    me_network = has_me
+    me_network = component.isAvailable("me_controller") or component.isAvailable("me_interface")
     if me_network == true then
         if component.isAvailable("me_controller") then
-            local list_ok, addr = pcall(component.list, "me_controller")
-            if list_ok then
-                addr = addr()
-                local proxy_ok, proxy = pcall(component.proxy, addr)
-                if proxy_ok then
-                    me_proxy = proxy
-                    current_me_address = addr
-                else
-                    io.stderr:write("Ошибка proxy МЭ контроллера: " .. tostring(proxy) .. "\n")
-                    me_proxy = nil
-                    current_me_address = nil
-                end
-            else
-                io.stderr:write("Ошибка list МЭ контроллера: " .. tostring(addr) .. "\n")
-                me_proxy = nil
-                current_me_address = nil
-            end
+            local addr = component.list("me_controller")()
+            me_proxy = component.proxy(addr)
+            current_me_address = addr
         elseif component.isAvailable("me_interface") then
-            local list_ok, addr = pcall(component.list, "me_interface")
-            if list_ok then
-                addr = addr()
-                local proxy_ok, proxy = pcall(component.proxy, addr)
-                if proxy_ok then
-                    me_proxy = proxy
-                    current_me_address = addr
-                else
-                    io.stderr:write("Ошибка proxy МЭ интерфейса: " .. tostring(proxy) .. "\n")
-                    me_proxy = nil
-                    current_me_address = nil
-                end
-            else
-                io.stderr:write("Ошибка list МЭ интерфейса: " .. tostring(addr) .. "\n")
-                me_proxy = nil
-                current_me_address = nil
-            end
+            local addr = component.list("me_interface")()
+            me_proxy = component.proxy(addr)
+            current_me_address = addr
         else
             me_proxy = nil
             current_me_address = nil
         end
     else
+        offFluid = true
         reason = "МЭ не найдена!"
     end
     return current_me_address
@@ -887,7 +797,11 @@ local function drawWidgets()
             buffer.drawText(x + 4,  y + 4,  colors.textclr, "Тип: " .. (reactor_type[i] or "-"))
             buffer.drawText(x + 4,  y + 5,  colors.textclr, "Запущен: " .. (reactor_work[i] and "Да" or "Нет"))
             buffer.drawText(x + 4,  y + 6,  colors.textclr, "Распад: " .. secondsToHMS(reactor_depletionTime[i] or 0))
+            buffer.drawText(x + 4,  y + 7,  colors.textclr, "Потреб: " .. (reactor_type[i] == "Fluid" and reactor_ConsumptionPerSecond[i] or "0") .. " mB/s")
             animatedButton(1, x + 6, y + 8, (reactor_work[i] and "Отключить" or "Включить"), nil, nil, 10, nil, nil, (reactor_work[i] and 0xfd3232 or 0x2beb1a))
+            if reactor_type[i] == "Fluid" then
+                drawVerticalProgressBar(x + 1, y + 1, 9, reactor_getcoolant[i], reactor_maxcoolant[i], 0x0044FF, 0x00C8FF, colors.bg2)
+            end
         else
             local x, y = widgetCoords[i][1], widgetCoords[i][2]
             buffer.drawRectangle(x + 1, y, 20, 11, colors.msgwarn, 0, " ")
@@ -905,6 +819,9 @@ local function drawWidgets()
             buffer.drawText(x + 4,  y + 6,  colors.msgerror, "Аварийно отключен!")
             buffer.drawText(x + 4,  y + 7,  colors.msgerror, "Причина:")
             buffer.drawText(x + 4,  y + 8,  colors.msgerror, (reason or "Неизвестная ошибка!"))
+            if reactor_type[i] == "Fluid" then
+                drawVerticalProgressBar(x + 1, y + 1, 9, reactor_getcoolant[i], reactor_maxcoolant[i], 0x0044FF, 0x00C8FF, colors.bg2)
+            end
         end
     end
 end
@@ -1060,6 +977,31 @@ end
 if not fs.exists("tmp") then
     fs.makeDirectory("tmp")
 end
+local function loadSupportersFromURL(url, tmpFile)
+    tmpFile = tmpFile or "/tmp/supporters.txt"
+    -- удаляем временный файл
+    os.execute("rm " .. tmpFile .. " > /dev/null 2>&1")
+
+    -- обернем всё в pcall, чтобы ловить ошибки
+    local ok, content = pcall(function()
+        -- пробуем скачать файл
+        os.execute("wget -fq " .. url .. " " .. tmpFile .. " > /dev/null 2>&1")
+
+        -- пробуем открыть файл
+        local f = io.open(tmpFile, "r")
+        if not f then return nil end
+
+        local line = f:read("*l")
+        f:close()
+        return line
+    end)
+
+    if ok then
+        return content -- nil, если что-то не получилось
+    else
+        return nil -- ошибка wget или io.open
+    end
+end
 
 local function drawRightMenu()
     local startColor = colors.textclr
@@ -1076,6 +1018,10 @@ local function drawRightMenu()
         buffer.drawText(124, 4 + i, baseColor, entry.text or "", alpha)
     end
 
+    if supportersText then
+        buffer.drawText(124, 5, colors.textclr, "Спасибо за поддержку:")
+        drawMarquee(124, 6, supportersText ..  "                            ", 0xF15F2C)
+    end
     
     buffer.drawChanges()
 end
@@ -1336,15 +1282,12 @@ local function drawStatic()
     end
 
     if picture then
-        local ok, err = pcall(function() buffer.drawImage(1, 1, picture) end)
-        if not ok then
-            buffer.drawText(1, 1, colors.msgerror, "Ошибка рисования изображения: " .. tostring(err))
-            return
-        end
+        buffer.drawImage(1, 1, picture)
     else
         buffer.drawText(1, 1, colors.msgerror, "Ошибка загрузки изображения! Проверьте наличие файлов 'image/reactorGUI.pic'")
         return
     end
+    animatedButton(1, 5, 44, "🔧", nil, nil, 4, nil, nil, 0xa91df9, 0xffffff)
     animatedButton(1, 5, 47, "ⓘ", nil, nil, 4, nil, nil, 0xa91df9, 0x05e2ff)
     animatedButton(1, 13, 44, "Отключить реакторы!", nil, nil, 24, nil, nil, 0xfd3232)
     animatedButton(1, 41, 44, "Запуск реакторов!", nil, nil, 23, nil, nil, 0x35e525)
@@ -1353,12 +1296,29 @@ local function drawStatic()
     animatedButton(1, 41, 47, "Выход из программы.", nil, nil, 23, nil, nil, colors.whitebtn)
     animatedButton(1, 68, 47, "Метрика: " .. status_metric, nil, nil, 18, nil, nil, colors.whitebtn)
 
-    buffer.drawText(123, 50, (theme and 0xc3c3c3 or 0x666666), "Reactor Control v" .. version .. "." .. build .. " by Flixmo")
-    -- buffer.drawText(130, 50, (theme and 0xc3c3c3 or 0x666666), "by Flixmo") -- Контакты: VK: @p1kachu337, Discord: p1kachu337 TG: @sh1zurz
+    buffer.drawText(123, 50, (theme and 0xc3c3c3 or 0x666666), "Reactor Control v" .. version .. "." .. build .. " by P1KaChU337")
+    -- buffer.drawText(130, 50, (theme and 0xc3c3c3 or 0x666666), "by P1KaChU337") -- Контакты: VK: @p1kachu337, Discord: p1kachu337 TG: @sh1zurz
     
     buffer.drawChanges()
 end
 
+local function getTotalFluidConsumption()
+    local total = 0
+    local consumeSecond = 0
+    
+    for i = 1, #reactors_proxy do
+        local reactor = reactors_proxy[i]
+        if reactor_type[i] == "Fluid" then
+            if reactor_work[i] then
+                consumeSecond = safeCall(reactor, "getFluidCoolantConsume", 0) or 0
+                reactor_ConsumptionPerSecond[i] = consumeSecond
+                total = total + consumeSecond
+            end
+        end
+    end
+    
+    return total
+end
 
 local function drawStatus(num)
     checkReactorStatus()
@@ -1390,6 +1350,7 @@ local function drawStatus(num)
     -- Сдвиг x с 88 на 90
     buffer.drawText(90, 46, colors.textclr, "Кол-во реакторов: " .. reactors)
     buffer.drawText(90, 47, colors.textclr, "Общее потребление")
+    buffer.drawText(90, 48, colors.textclr, "жидкости: " .. consumeSecond .. " Mb/s")
 
     if any_reactor_on == true then
         -- Сдвиг координат индикатора (110->112, 111->113, 115->117)
@@ -1414,6 +1375,24 @@ local function drawStatus(num)
     buffer.drawChanges()
 end
 
+local function drawPorog()
+    local fl_y1 = 35
+    if flux_network == true then fl_y1 = 32 end
+    buffer.drawRectangle(123, fl_y1-1, 35, 4, colors.bg, 0, " ")
+    for i = 0, 35 - 1 do
+        buffer.drawText(123 + i, fl_y1-2, colors.bg, brailleChar(brail_console[1]))
+    end
+    for i = 0, 35 - 1 do
+        buffer.drawText(123 + i, fl_y1, colors.bg2, brailleChar(brail_console[2]))
+    end
+    buffer.drawText(124, fl_y1-1, colors.textclr, "Настройка порога жидкости:")
+    
+    drawDigit(124, fl_y1+1, brail_greenbtn, 0xa6ff00)
+    drawDigit(126, fl_y1+1, brail_redbtn, 0xff2121) 
+  
+    drawNumberWithText(144, fl_y1+1, porog, 2, colors.textclr, "Mb", colors.textclr)
+    buffer.drawChanges()
+end
 
 local function round(num, digits)
     local mult = 10 ^ (digits or 0)
@@ -1476,7 +1455,47 @@ local function formatFluxRF(value)
     return str, suffixes[i]
 end
 
+local function formatFluid(value)
+    if type(value) ~= "number" then value = 0 end
+    if metric == 0 then
+        -- Auto
+        if value >= 1e9 then
+            return round(value / 1e9, 1), "gMb"
+        elseif value >= 1e6 then
+            return round(value / 1e6, 1), "mMb"
+        elseif value >= 1e3 then
+            return round(value / 1e3, 1), "kMb"
+        else
+            return round(value, 1), "Mb"
+        end
+    elseif metric == 1 then
+        return round(value, 1), "Mb"
+    elseif metric == 2 then
+        return round(value / 1e3, 1), "kMb"
+    elseif metric == 3 then
+        return round(value / 1e6, 1), "mMb"
+    elseif metric == 4 then
+        return round(value / 1e9, 1), "gMb"
+    end
+end
 
+local function drawFluidinfo()
+    local fl_y1 = 30
+    if flux_network == true then fl_y1 = 27 end
+    buffer.drawRectangle(123, fl_y1-1, 35, 4, colors.bg, 0, " ")
+    for i = 0, 35 - 1 do
+        buffer.drawText(123 + i, fl_y1-2, colors.bg, brailleChar(brail_console[1]))
+    end
+    for i = 0, 35 - 1 do
+        buffer.drawText(123 + i, fl_y1, colors.bg2, brailleChar(brail_console[2]))
+    end
+    buffer.drawText(124, fl_y1-1, colors.textclr, "Жидкости в МЭ сети:")
+    
+    drawDigit(125, fl_y1+1, brail_fluid, 0x0088ff)
+
+    local val, unit = formatFluid(fluidInMe or 0)
+    drawNumberWithText(143, fl_y1+1, (me_network and (val or 0) or 0), 2, colors.textclr, unit, colors.textclr)
+end
 
 local function drawFluxRFinfo()
     initFlux()
@@ -1547,8 +1566,10 @@ local function drawDynamic()
     buffer.drawText(124, 3, colors.textclr, "Информационное окно отладки:")
     drawStatus()
     -- -----------------------------------------------------------
+    drawFluidinfo()
 
     -- -----------------------------------------------------------
+    drawPorog()
 
     -- -----------------------------------------------------------
     drawFluxRFinfo()
@@ -1574,6 +1595,10 @@ local function updateReactorData(num)
         reactor_rf[i]       = safeCall(proxy, "getEnergyGeneration", 0)
         reactor_work[i]     = safeCall(proxy, "hasWork", false)
 
+        if reactor_type[i] == "Fluid" then
+            reactor_getcoolant[i] = safeCall(proxy, "getFluidCoolant", 0) or 0
+            reactor_maxcoolant[i] = safeCall(proxy, "getMaxFluidCoolant", 0) or 1
+        end
     end
     drawWidgets()
     drawRFinfo()
@@ -1590,18 +1615,57 @@ local function start(num)
         local proxy = reactors_proxy[i]
 
 
-        safeCall(proxy, "activate")
-        reactor_work[i] = true
-        if num then
-            if rType == "Fluid" then
-                message("Реактор #" .. i .. " запущен!", colors.msginfo, 34)
+        if rType == "Fluid" then
+            if offFluid == false then
+                safeCall(proxy, "activate")
+                reactor_work[i] = true
+                if num then
+                    message("Реактор #" .. i .. " (жидкостный) запущен!", colors.msginfo, 34)
+                end
             else
-                message("Реактор #" .. i .. " запущен!", colors.msginfo, 34)
+                if fluidInMe <= porog then
+                    if num then
+                        message("Ошибка по жидкости! Реактор #" .. i .. " (жидкостный) не был запущен!", colors.msgwarn, 34)
+                    end
+                    offFluid = true
+                    if reason == nil then
+                        reason = "Ошибка жидкости!"
+                        reactor_aborted[i] = true
+                    end
+                else
+                    offFluid = false
+                    safeCall(proxy, "activate")
+                    reactor_work[i] = true
+                    if num then
+                        message("Реактор #" .. i .. " (жидкостный) запущен!", colors.msginfo, 34)
+                    end
+                end
+            end
+        else
+            safeCall(proxy, "activate")
+            reactor_work[i] = true
+            if num then
+                message("Реактор #" .. i .. " (воздушный) запущен!", colors.msginfo, 34)
             end
         end
     end
     if not num then
-        message("Реакторы запущены!", colors.msginfo, 34)
+        if offFluid == true then
+            local isAir = false
+            for i = 1, reactors do
+                local rType = reactor_type[i]
+                if rType == "Air" then
+                    isAir = true
+                    break
+                end
+            end
+            if isAir == true then
+                message("Воздушные реакторы запущены!", colors.msginfo, 34)
+            end
+            message("Ошибка по жидкости! Жидкостные реакторы не будут запущены!", colors.msgwarn, 34)
+        else
+            message("Реакторы запущены!", colors.msginfo, 34)
+        end
     end
     drawWidgets()
 end
@@ -1660,6 +1724,101 @@ local function updateMeProxy()
     end
 end
 
+local function checkFluid()
+    MeSecond = 0
+    if not me_network then
+        offFluid = true
+        reason = "МЭ не найдена!"
+        fluidInMe = 0
+        drawFluidinfo()
+        return
+    end
+
+    if not me_proxy then
+        updateMeProxy()
+        if not me_proxy then
+            offFluid = true
+            reason = "Нет прокси МЭ!"
+            fluidInMe = 0
+            drawFluidinfo()
+            return
+        end
+    end
+
+    local ok, items = pcall(me_proxy.getItemsInNetwork, { name = "ae2fc:fluid_drop" })
+    if not ok or type(items) ~= "table" then
+        offFluid = true
+        reason = "Ошибка жидкости!"
+        fluidInMe = 0
+        drawFluidinfo()
+        return
+    end
+
+    local targetFluid = "low_temperature_refrigerant"
+    local count = 0
+
+    for _, item in ipairs(items) do
+        if item.label and item.label:find(targetFluid) then
+            count = count + (item.size or 0)
+        end
+    end
+
+    if count == 0 then
+        offFluid = true
+        reason = "Нет хладагента!"
+    end
+
+    if count > maxThreshold then
+        count = lastValidFluid
+    else
+        lastValidFluid = count
+    end
+
+    fluidInMe = count
+    drawFluidinfo()
+
+    if fluidInMe <= porog then
+        if ismechecked == false then
+            message("Жидкости в МЭ меньше порога!", colors.msgwarn, 34)
+            for i = 1, reactors do
+                if reactor_type[i] == "Fluid" then
+                    drawStatus(i)
+                    if reactor_work[i] == true then
+                        message("Отключаю жидкостные реакторы...", colors.textclr, 34)
+                        break
+                    end
+                end
+            end
+        end
+        offFluid = true
+        reason = "Нет хладагента!"
+        ismechecked = true
+    else
+        if offFluid == true and starting == true then
+            message("Жидкости хватает, включаю реакторы...", colors.textclr, 34)
+            offFluid = false
+            ismechecked = false
+            for i = 1, reactors do
+                if reactor_type[i] == "Fluid" then
+                    start(i)
+                    reactor_aborted[i] = false
+                    updateReactorData(i)
+                end
+            end
+        end
+        if offFluid == true then 
+            offFluid = false 
+            for i = 1, reactors do
+                if reactor_type[i] == "Fluid" then
+                    if reactor_aborted[i] == true then
+                        reactor_aborted[i] = false
+                        updateReactorData(i)
+                    end
+                end
+            end
+        end
+    end
+end
 
 function onInterrupt()
     message("Обнаружено прерывание!", colors.msgerror)
@@ -1741,9 +1900,20 @@ local function logError(err)
             f:write("starting=" .. tostring(starting) ..
                     ", reactors=" .. tostring(reactors) ..
                     ", me_network=" .. tostring(me_network) ..
+                    ", fluidInMe=" .. tostring(fluidInMe) ..
                     ", work=" .. tostring(work) ..
                     ", any_reactor_on=" .. tostring(any_reactor_on) .. "\n")
 
+            if reactors > 0 then
+                local coolant_line = "coolant_levels="
+                for i = 1, reactors do
+                    coolant_line = coolant_line .. tostring(reactor_getcoolant[i] or "nil")
+                    if i < reactors then
+                        coolant_line = coolant_line .. ", "
+                    end
+                end
+                f:write(coolant_line .. "\n")
+            end
 
             f:write("\n")
             f:close()
@@ -1903,17 +2073,29 @@ local function drawSettingsMenu()
     -- Заголовки
     buffer.drawText(modalX + 11, modalY + 1, 0x000000, "Меню настроек приложения ReactorControl v" .. version .. "." .. build)
 
-    buffer.drawText(modalX + 5, modalY + 3, 0x000000, "Тема по умолчанию")
-    animatedButton(1, modalX + 4, modalY + 4, "Светлая      ", nil, nil, 20, nil, nil, 0x444444, 0xffffff)
-    local sw1_x, sw1_y, sw1_w = modalX+16, modalY+5, 7
+    buffer.drawText(modalX + 7, modalY + 3, 0x000000, "Порог жидкости")
+    createSearchField(modalX + 3, modalY + 5, 22, "Введите порог(Mb)")
+    searchFields[1].text = tostring(porog)
+    local offset = unicode.len(searchFields[1].text) + 1
+    searchFields[1].cursorPos = offset
+
+    buffer.drawText(modalX + 5, modalY + 7, 0x000000, "Тема по умолчанию")
+    animatedButton(1, modalX + 4, modalY + 8, "Светлая      ", nil, nil, 20, nil, nil, 0x444444, 0xffffff)
+    local sw1_x, sw1_y, sw1_w = modalX+16, modalY+9, 7
     local sw1_state = theme -- текущее состояние
     local sw1_pipePos = (sw1_state and (sw1_w - 2) or 1)   -- позиция (1 - лево, sw1_w-2 - право)
     drawSwitch(sw1_x, sw1_y, sw1_w, sw1_pipePos, sw1_state, nil, 0x777777, nil, 0x444444)
 
+    buffer.drawText(modalX + 3, modalY + 11, 0x000000, "Новые версии приложения")
+    animatedButton(1, modalX + 4, modalY + 12, "Проверять        ", nil, nil, 20, nil, nil, 0x444444, 0xffffff)
+    local sw2_x, sw2_y, sw2_w = modalX+16, modalY+13, 7
+    local sw2_state = updateCheck -- текущее состояние
+    local sw2_pipePos = (sw2_state and (sw2_w - 2) or 1)   -- позиция (1 - лево, sw2_w-2 - право)
+    drawSwitch(sw2_x, sw2_y, sw2_w, sw2_pipePos, sw2_state, nil, 0x777777, nil, 0x444444)
 
-    buffer.drawText(modalX + 3, modalY + 11, 0x000000, "Расширенное логирование")
-    animatedButton(1, modalX + 4, modalY + 12, "Включенно         ", nil, nil, 20, nil, nil, 0x444444, 0xffffff)
-    local sw3_x, sw3_y, sw3_w = modalX+16, modalY+13, 7
+    buffer.drawText(modalX + 3, modalY + 15, 0x000000, "Расширенное логирование")
+    animatedButton(1, modalX + 4, modalY + 16, "Включенно         ", nil, nil, 20, nil, nil, 0x444444, 0xffffff)
+    local sw3_x, sw3_y, sw3_w = modalX+16, modalY+17, 7
     local sw3_state = debugLog -- текущее состояние
     local sw3_pipePos = (sw3_state and (sw3_w - 2) or 1)   -- позиция (1 - лево, sw3_w-2 - право)
     drawSwitch(sw3_x, sw3_y, sw3_w, sw3_pipePos, sw3_state, nil, 0x777777, nil, 0x444444)
@@ -1996,7 +2178,9 @@ local function drawSettingsMenu()
 
     local themetoggle = theme
 
+    local NSporog = porog
     local NSTheme = theme
+    local NSUpdateCheck = updateCheck
     local NSDebugLog = debugLog
     local NSusers = {}
     for _, u in ipairs(users) do
@@ -2062,6 +2246,8 @@ local function drawSettingsMenu()
                     start()
                 end
                 theme = NSTheme
+                porog = NSporog
+                updateCheck = NSUpdateCheck
                 debugLog = NSDebugLog
                 users = NSusers
                 saveCfg()
@@ -2154,7 +2340,9 @@ local function drawSettingsMenu()
                 animatedButton(1, modalX + 5, modalY + modalH - 4, "Сохранить и выйти", nil, nil, 18, nil, nil, 0x8100cc, 0xffffff)
                 buffer.drawChanges()
                 -- Сохраняем настройки
+                porog = tonumber(searchFields[1].text) or porog
                 theme = sw1_state
+                updateCheck = sw2_state
                 debugLog = sw3_state
                 saveCfg()
                 
@@ -2295,11 +2483,11 @@ local function drawInfoMenu()
     end
 
     local infotext = {
-        "Автор программы: Flixmo",
+        "Автор программы: P1KaChU337",
         "",
         "Контакты: vk.com/p1kachu337, Discord: p1kachu337, Telegram: @sh1zurz",
         "",
-        "GitHub проекта: github.com/Flixmo/Reactor-Control-for-OpenComputers",
+        "GitHub проекта: github.com/P1KaChU337/Reactor-Control-for-OpenComputers",
         "",
         "Поддержать проект можно, предварительно связавшись со мной для согласования способа поддержки (на карту, boosty, или иной подарок).",
         "",
@@ -2308,9 +2496,11 @@ local function drawInfoMenu()
         "Описание программы:",
         "Reactor Control — программа мониторинга, контроля и управления критически важными системами реакторного комплекса для игроков сервера McSkill HiTech 1.12.2, разработанная на базе мода OpenComputers. Программа предназначена для централизованного управления реакторами и связанными с ними инфраструктурными системами, а также для автоматического предотвращения аварийных ситуаций без необходимости постоянного ручного контроля.",
         "",
-        "Программа поддерживает работу с HT-реакторами и интеграцию с Flux Networks для контроля энергетической сети. Подключение осуществляется через адаптеры OpenComputers к соответствующим контроллерам. Основной упор сделан на стабильность, безопасность и корректную работу реакторных комплексов любого масштаба.",
+        "Программа поддерживает работу с жидкостными и воздушными HT-реакторами, интеграцию с Applied Energistics 2 для мониторинга и анализа жидкостей, а также интеграцию с Flux Networks для контроля энергетической сети. Подключение осуществляется через адаптеры OpenComputers к соответствующим контроллерам. Основной упор сделан на стабильность, безопасность и корректную работу реакторных комплексов любого масштаба.",
         "",
-        "Графический интерфейс программы отображает детальную информацию по каждому реактору, включая температуру, текущую генерацию энергии, тип реактора, статус включения и индивидуальный отсчёт времени до распада топливных стержней. В общем статусе комплекса выводится количество установленных реакторов и текущее состояние системы.",
+        "Реализована автоматическая система безопасности для жидкостных реакторов. При снижении уровня хладагента в МЭ-сети ниже заданного порога либо при полной недоступности МЭ-сети реакторы автоматически отключаются и переводятся в аварийный режим, в котором ручной запуск блокируется. После восстановления нормальных условий реакторы автоматически возвращаются в штатный режим и запускаются. Воздушные реакторы при проблемах с жидкостью не затрагиваются. Контроль состояния сетей и жидкостей выполняется на постоянной основе.",
+        "",
+        "Графический интерфейс программы отображает детальную информацию по каждому реактору, включая температуру, текущую генерацию энергии, тип реактора, статус включения, уровень хладагента в буфере, индивидуальный отсчёт времени до распада топливных стержней и данные о потреблении жидкости. В общем статусе комплекса выводится количество установленных реакторов и текущее состояние системы.",
         "",
         "Программа поддерживает управление и получение информации через игровой чат с использованием Chat Box. Это позволяет запускать и останавливать реакторы, получать статус комплекса, изменять параметры безопасности и управлять списком пользователей без прямого взаимодействия с интерфейсом компьютера. Реализована система пользователей и прав доступа, а также гибкая конфигурация с пользовательскими настройками.",
         "",
@@ -2341,7 +2531,7 @@ local function drawInfoMenu()
     local licenseText = {
         "MIT License", 
         "",
-        "Copyright (c) 2025 Flixmo",
+        "Copyright (c) 2025 P1KaChU337",
         "",
         "English Version",
         "Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the \"Software\"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions: The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.",
@@ -2451,8 +2641,167 @@ local function drawInfoMenu()
 end
 
 -- -----------------------------------------------------
+local function checkVer()
+    if updateCheck == true then
+        local update = false
+        local newVer = progVer
+
+        local ok = os.execute("wget -fq https://github.com/P1KaChU337/Reactor-Control-for-OpenComputers/raw/refs/heads/main/versions.txt versions.txt > /dev/null 2>&1")
+        if ok then
+            local f = io.open("versions.txt", "r")
+            if f then
+                local remoteVer = f:read("*l")
+                f:close()
+
+                if remoteVer and remoteVer ~= "" then
+                    local function verToTable(v)
+                        local t = {}
+                        for num in v:gmatch("%d+") do
+                            table.insert(t, tonumber(num))
+                        end
+                        return t
+                    end
+
+                    local function isNewer(v1, v2) -- v1 > v2 ?
+                        local a, b = verToTable(v1), verToTable(v2)
+                        for i = 1, math.max(#a, #b) do
+                            local n1, n2 = a[i] or 0, b[i] or 0
+                            if n1 > n2 then return true end
+                            if n1 < n2 then return false end
+                        end
+                        return false
+                    end
+
+                    if isNewer(remoteVer, progVer) then
+                        update = true
+                        newVer = remoteVer
+                    end
+                end
+            end
+        end
+
+        os.execute("rm versions.txt > /dev/null 2>&1")
+        os.execute("rm updater > /dev/null 2>&1")
+
+        if update == true then
+            message("Вышла новая версия программы...", nil, 34)
+            local verfile = io.open("oldVersion.txt", "w")
+            if verfile then
+                verfile:write(progVer)
+                verfile:close()
+            end
+            
+            if work == true and any_reactor_on == true then
+                stop()
+            end
+            local old = buffer.copy(1, 1, 160, 50)
+            buffer.drawRectangle(1, 1, 160, 50, 0x000000, 0, " ", 0.4)
+
+            buffer.drawRectangle(40, 22, 80, 6, 0xcccccc, 0, " ")
+            buffer.drawRectangle(39, 23, 82, 4, 0xcccccc, 0, " ")
+            local cornerPos = {
+                {39, 22, 1}, {120, 22, 2},
+                {120, 27, 3}, {39, 27, 4}
+            }
+            for _, c in ipairs(cornerPos) do
+                buffer.drawText(c[1], c[2], 0xcccccc, brailleChar(brail_status[c[3]]))
+            end
+            buffer.drawText(45, 23, 0x000000, "Доступно обновление Reactor Control by P1KaChU337 (v" .. progVer ..", --> v" .. newVer .. ").")
+            buffer.drawText(43, 24, 0x000000, "Нажмите \"ОК\" для продолжения без обновления или \"Установить\" для обновления.")
+            animatedButton(1, 70, 25, "Ок", nil, nil, 6, nil, nil, 0x8100cc, 0xffffff)
+            animatedButton(1, 80, 25, "Установить", nil, nil, 10, nil, nil, 0x8100cc, 0xffffff)    
+
+            buffer.drawChanges()
+            while true do
+                local eventData = {event.pull(0.05)}
+                local eventType = eventData[1]
+                if eventType == "touch" then
+                    local _, _, x, y = table.unpack(eventData)
+
+                    if y >= 25 and y <= 27 and x >= 69 and x <= 76 then
+                        buffer.drawRectangle(69, 25, 7, 3, 0xcccccc, 0, " ")
+                        animatedButton(1, 70, 25, "Ок", nil, nil, 6, nil, nil, 0xa91df9, 0xffffff)
+                        animatedButton(2, 70, 25, "Ок", nil, nil, 6, nil, nil, 0xa91df9, 0xffffff)
+                        buffer.drawChanges()
+                        os.sleep(0.2)
+                        animatedButton(1, 70, 25, "Ок", nil, nil, 6, nil, nil, 0x8100cc, 0xffffff)
+                        buffer.drawChanges()
+
+                        buffer.paste(1, 1, old)
+                        buffer.drawChanges()
+                        message("Установка обновлений отменена!", nil, 34)
+                        break
+                    end
+
+                    if y >= 25 and y <= 27 and x >= 79 and x <= 90 then
+                        buffer.drawRectangle(79, 25, 11, 3, 0xcccccc, 0, " ")
+                        animatedButton(1, 80, 25, "Установить", nil, nil, 10, nil, nil, 0xa91df9, 0xffffff)
+                        animatedButton(2, 80, 25, "Установить", nil, nil, 10, nil, nil, 0xa91df9, 0xffffff)
+                        buffer.drawChanges()
+                        os.sleep(0.2)
+                        animatedButton(1, 80, 25, "Установить", nil, nil, 10, nil, nil, 0x8100cc, 0xffffff)
+                        buffer.drawChanges()
+                        os.sleep(0.5)
+                        buffer.drawRectangle(69, 25, 25, 3, 0xcccccc, 0, " ")
+                        buffer.drawText(70, 26, 0x767676, "Установка обновлений...")
+                        buffer.drawChanges()
+
+                        local ok = os.execute("wget -fq https://github.com/P1KaChU337/Reactor-Control-for-OpenComputers/raw/refs/heads/main/installer/updater.lua updater > /dev/null 2>&1")
+                        if not ok then
+                            buffer.paste(1, 1, old)
+                            message("Обновление прервано из-за ошибки!", colors.msgwarn, 34)
+                            os.execute("rm updater > /dev/null 2>&1")
+                            buffer.drawChanges()
+                            return
+                        end
+
+                        local f = io.open("updater", "r")
+                        if not f then
+                            buffer.paste(1, 1, old)
+                            message("Обновление прервано из-за ошибки!", colors.msgwarn, 34)
+                            os.execute("rm updater > /dev/null 2>&1")
+                            buffer.drawChanges()
+                            return
+                        end
+                        local content = f:read("*a")
+                        f:close()
+
+                        if not content or content == "" then
+                            buffer.paste(1, 1, old)
+                            message("Обновление прервано из-за ошибки!", colors.msgwarn, 34)
+                            os.execute("rm updater > /dev/null 2>&1")
+                            buffer.drawChanges()
+                            return
+                        end
+
+                        buffer.clear(0x000000)
+                        buffer.drawChanges()
+                        shell.execute("clear")
+                        rawset(_G, "__NR_ON_INTERRUPT__", nil)
+                        exit = true
+                        os.execute("updater")
+                        os.exit()
+                    end
+                end
+            end
+        end
+    end
+end
 
 -- ----------------------------------------------------------------------------------------------------
+local function loadChangelog(url, tmpFile)
+    tmpFile = tmpFile or "/tmp/changelog.lua"
+    os.execute("wget -fq " .. url .. " " .. tmpFile .. " > /dev/null 2>&1")
+
+    local ok, chunk = pcall(loadfile, tmpFile)
+    if ok and chunk then
+        local ok2, data = pcall(chunk)
+        if ok2 and type(data) == "table" then
+            return data
+        end
+    end
+    return nil
+end
 
 
 local function handleChatCommand(nick, msg, args)
@@ -2481,6 +2830,7 @@ local function handleChatCommand(nick, msg, args)
             chatBox.say("§a@useradd - добавить пользователя (пример: @useradd Ник)") -- Сделай
             chatBox.say("§a@userdel - удалить пользователя (пример: @userdel Ник)")
             chatBox.say("§a@status - статус системы")
+            chatBox.say("§a@setporog - установка порога жидкости (пример: @setporog 500)")
             chatBox.say("§a@start - запуск всех реакторов (или @start 1 для запуска только 1-го)")
             chatBox.say("§a@stop - остановка всех реакторов (или @stop 1 для остановки только 1-го)")
             chatBox.say("§a@exit - выход из программы")
@@ -2508,7 +2858,10 @@ local function handleChatCommand(nick, msg, args)
                 chatBox.say("§aЗапущены: " .. table.concat(running, ", "))
             end
 
+            chatBox.say("§aЖидкости в МЭ: " .. fluidInMe .. " Mb")
+            chatBox.say("§aПорог: " .. porog .. " Mb")
             chatBox.say("§aГенерация реакторов: " .. rf .. " RF/t")
+            chatBox.say("§aОбщее потребление жидкости реакторами: " .. consumeSecond .. " mB/s")
             -- chatBox.say("§aСостояние реакторов:")
             -- for i = 1, reactors do
             --     if reactor_work[i] == true then
@@ -2560,11 +2913,29 @@ local function handleChatCommand(nick, msg, args)
             end
         end
 
+    elseif msg:match("^@setporog") then
+        local newPorog = tonumber(args:match("^(%d+)"))
+        if newPorog then
+            if newPorog <= 0 then
+                chatBox.say("§cПорог жидкости не может быть отрицательным или нулевым!")
+            else
+                porog = newPorog
+                if isChatBox then
+                    chatBox.say("§2Порог жидкости установлен на " .. porog .. " Mb")
+                end
+            end
+        else
+            if isChatBox then
+                chatBox.say("§aЧтобы изменить порог жидкости, используйте: @setporog <значение>")
+                chatBox.say("§aПример: @setporog 500")
+            end
+        end
+        
     elseif msg == "@info" then
         if isChatBox then
             chatBox.say("§bReactor Control v" .. version .. " Build " .. build)
-            chatBox.say("§aАвтор: §eFlixmo")
-            chatBox.say("§aGitHub: §1https://github.com/Flixmo/Reactor-Control-for-OpenComputers")
+            chatBox.say("§aАвтор: §eP1KaChU337")
+            chatBox.say("§aGitHub: §1https://github.com/P1KaChU337/Reactor-Control-for-OpenComputers")
             chatBox.say("§aПоддержать автора на §6Boosty: §1https://boosty.to/p1kachu337")
             chatBox.say("§aИгроки с доступом: §5" .. table.concat(users, ", "))
             chatBox.say("§aСпасибо за использование программы!")
@@ -2708,6 +3079,8 @@ end
 -- ----------------------------------------------------------------------------------------------------
 
 local function handleTouch(x, y, uuid)
+    local fl_y1 = config.clickAreaPorogPlus.y1
+    if flux_network == true then fl_y1 = config.clickAreaPorogPlus.y2 end
     if y >= config.clickArea1.y1 and
         y <= config.clickArea1.y2 and 
         x >= config.clickArea1.x1 and 
@@ -2751,6 +3124,36 @@ local function handleTouch(x, y, uuid)
 
         os.sleep(0.3)
         drawDynamic()
+    elseif 
+        y >= config.clickArea19.y1 and
+        y <= config.clickArea19.y2 and 
+        x >= config.clickArea19.x1 and 
+        x <= config.clickArea19.x2 then
+        buffer.drawRectangle(4, 44, 6, 3, colors.bg3, 0, " ")
+        animatedButton(1, 5, 44, "🔧", nil, nil, 4, nil, nil, 0x8100cc, 0xffffff)
+        animatedButton(2, 5, 44, "🔧", nil, nil, 4, nil, nil, 0x8100cc, 0xffffff)
+        buffer.drawChanges()
+        
+        os.sleep(0.2)
+        animatedButton(1, 5, 44, "🔧", nil, nil, 4, nil, nil, 0xa91df9, 0xffffff)
+        buffer.drawChanges()
+        
+        drawSettingsMenu()
+    elseif 
+        y >= config.clickArea20.y1 and
+        y <= config.clickArea20.y2 and 
+        x >= config.clickArea20.x1 and 
+        x <= config.clickArea20.x2 then
+        buffer.drawRectangle(4, 47, 6, 3, colors.bg3, 0, " ")
+        animatedButton(1, 5, 47, "ⓘ", nil, nil, 4, nil, nil, 0x8100cc, 0x05e2ff)
+        animatedButton(2, 5, 47, "ⓘ", nil, nil, 4, nil, nil, 0x8100cc, 0x05e2ff)
+        buffer.drawChanges()
+        
+        os.sleep(0.2)
+        animatedButton(1, 5, 47, "ⓘ", nil, nil, 4, nil, nil, 0xa91df9, 0x05e2ff)
+        buffer.drawChanges()
+        
+        drawInfoMenu()    
     elseif 
         y >= config.clickArea4.y1 and
         y <= config.clickArea4.y2 and 
@@ -2848,6 +3251,7 @@ local function handleTouch(x, y, uuid)
         animatedButton(1, 68, 44, "Пр.Обновить МЭ", nil, nil, 18, nil, nil, 0x38afff)
         animatedButton(2, 68, 44, "Пр.Обновить МЭ", nil, nil, 18, nil, nil, 0x38afff)
         buffer.drawChanges()
+        checkFluid()
         os.sleep(0.2)
         animatedButton(1, 68, 44, "Пр.Обновить МЭ", nil, nil, 18, nil, nil, nil)
         buffer.drawChanges()
@@ -2892,6 +3296,36 @@ local function handleTouch(x, y, uuid)
         os.sleep(0.2)
         animatedButton(1, 68, 47, "Метрика: " .. status_metric, nil, nil, 18, nil, nil, colors.whitebtn)
         drawDynamic()
+    elseif
+    
+        y >= fl_y1 and
+        y <= fl_y1 and 
+        x >= config.clickAreaPorogPlus.x1 and 
+        x <= config.clickAreaPorogPlus.x2 then
+
+        porog = porog + 2500
+        saveCfg()
+        drawDigit(124, fl_y1, brail_greenbtn, 0x5f9300)
+        buffer.drawChanges()
+        os.sleep(0.2)
+        drawPorog()
+    elseif
+        y >= fl_y1 and
+        y <= fl_y1 and
+        x >= config.clickAreaPorogMinus.x1 and
+        x <= config.clickAreaPorogMinus.x2 then
+        if porog > 0 then
+            porog = porog - 2500
+            saveCfg()
+            if porog == 27500 then
+                message("Порог ниже рекомендованного!", colors.msgwarn)
+            end     
+        end
+        drawDigit(126, fl_y1, brail_redbtn, 0x9d0000)
+        buffer.drawChanges()
+        os.sleep(0.2)
+        drawPorog()
+    end
     for i = 1, reactors do
         local clickArea = config["clickArea" .. (6 + i)]
         if y >= clickArea.y1 and y <= clickArea.y2 and x >= clickArea.x1 and x <= clickArea.x2 and reactor_aborted[i] == false or nil then
@@ -2945,6 +3379,8 @@ local function mainLoop()
     reactor_aborted = {}
     reactors_proxy = {}
     reactor_rf = {}
+    reactor_getcoolant = {}
+    reactor_maxcoolant = {}
     reactor_depletionTime = {}
     
     me_proxy = nil
@@ -2955,10 +3391,8 @@ local function mainLoop()
     minute = 0
     hour = 0
     last_me_address = nil
-    MeSecond = 0
-    work = false
-    starting = false
     
+    if porog < 0 then porog = 0 end
     
     switchTheme(theme)
     initReactors()
@@ -2967,16 +3401,16 @@ local function mainLoop()
     initChatBox()
     silentstop()
     
-    consoleLines = {}
     for i = 1, (flux_network and 19 or 21) do
-        consoleLines[i] = {text = "", textBase = "", color = colors.textclr, count = 0}
+        consoleLines[i] = ""
     end 
     last_me_address = addr
     drawStatic()
     drawDynamic()
     message("------Reactor Control v" .. version .. "-------", 0x72f8ff)
-    message("Автор приложения: Flixmo", 0x72f8ff)
+    message("Автор приложения: P1KaChU337", 0x72f8ff)
     message("Версия приложения: " .. version .. ", Build " .. build, 0x72f8ff)
+    message("Авто-обновление: " .. (updateCheck and "Включенно" or "Выключенно"), 0x72f8ff, 34)
     message("Реакторов найдено: " .. reactors, 0x72f8ff)
     message("МЭ-сеть: " .. (me_network and "Подключена" or "Не подключена"), 0x72f8ff)
     message("Flux-сеть: " .. (flux_network and "Подключена" or "Не подключена"), 0x72f8ff)
@@ -2985,6 +3419,8 @@ local function mainLoop()
     message(" ")
     userUpdate()
     message("Инициализация реакторов...", colors.textclr)
+    supportersText = loadSupportersFromURL("https://github.com/P1KaChU337/Reactor-Control-for-OpenComputers/raw/refs/heads/main/supporters.txt")
+    changelog = loadChangelog("https://github.com/P1KaChU337/Reactor-Control-for-OpenComputers/raw/refs/heads/main/changelog.lua")
     updateReactorData()
     if reactors ~= 0 then
         message("Реакторы инициализированы!", colors.msginfo, 34)
@@ -2992,6 +3428,7 @@ local function mainLoop()
         message("Реакторы не найдены!", colors.msgerror)
         message("Проверьте подключение реакторов!", colors.msgerror, 34)
     end
+    checkFluid()
     if starting == true then
         start()
     end
@@ -3014,6 +3451,20 @@ local function mainLoop()
         end
         return
     end
+    if offFluid == true then
+        for i = 1, reactors do
+            if reactor_type[i] == "Fluid" then
+                if reactor_work[i] == true then
+                    stop(i)
+                end
+                updateReactorData(i)
+                reactor_aborted[i] = true
+            end
+        end
+        drawFluidinfo()
+        drawWidgets()
+    end
+    checkVer()
     if isFirstStart == true then
         drawSettingsMenu()
         message("Первый запуск программы завершен!", colors.msginfo)
@@ -3040,9 +3491,23 @@ local function mainLoop()
         if meChanged() then
             os.sleep(1)
             initMe()
+            checkFluid()
             message("МЭ система обновленна", colors.textclr)
         end
 
+        if offFluid == true then
+            for i = 1, reactors do
+                if reactor_type[i] == "Fluid" then
+                    if reactor_work[i] == true then
+                        stop(i)
+                        updateReactorData(i)
+                        reactor_aborted[i] = true
+                        drawFluidinfo()
+                        drawWidgets()
+                    end
+                end
+            end
+        end
 
         if now - lastTime >= 1 then
             lastTime = now
@@ -3056,14 +3521,31 @@ local function mainLoop()
                         local proxy = reactors_proxy[i]
                         if proxy and proxy.getTemperature then
                             reactor_rf[i] = safeCall(proxy, "getEnergyGeneration", 0)
+                            reactor_maxcoolant[i] = safeCall(proxy, "getMaxFluidCoolant", 0) or 1
                         else
                             reactor_rf[i] = 0
+                            reactor_maxcoolant[i] = 1
                         end
                         
                     end
                     drawRFinfo()
                 end
 
+                if second % 2 == 0 then
+                    for i = 1, reactors do
+                        if reactor_type[i] == "Fluid" then
+                            local proxy = reactors_proxy[i]
+                            if proxy and proxy.getFluidCoolant then
+                                temperature[i]  = safeCall(proxy, "getTemperature", 0)
+                                reactor_getcoolant[i] = safeCall(proxy, "getFluidCoolant", 0) or 0
+                            else
+                                reactor_getcoolant[i] = 0
+                                temperature[i] = 0
+                            end
+                        end
+                        
+                    end
+                end
             -- else -- Убрал else возможно временно если будут баги
                 if second % 13 == 0 then
                     for i = 1, reactors do
@@ -3078,9 +3560,35 @@ local function mainLoop()
                     end
                 end
             end
+            for i = 1, reactors do
+                if reactor_type[i] == "Fluid" then
+                    local current_coolant = reactor_getcoolant[i]
+                    local max_coolant = reactor_maxcoolant[i]
+                    
+                    -- 1. Проверка на аварийную остановку (ниже 60%)
+                    if current_coolant <= (max_coolant * 0.68) then
+                        if reactor_work[i] == true then
+                            silentstop(i)
+                            -- updateReactorData(i)
+                            reactor_aborted[i] = true
+                            reason = "Нет жидкости"
+                            message("Реактор " .. i .. " ОСТАНОВЛЕН! Уровень буфера критически низок", colors.msgwarn)
+                            message("Проверьте реакторную зону!", colors.msgwarn)
+                            -- message("Запуск реактора #" .. i .. " возможен только вручную.", colors.msgwarn)
+                        end
+                    end
+
+                    -- 2. Проверка на готовность к запуску (выше 80%)
+                    -- Это позволит убрать флаг ошибки, когда бак достаточно заполнится
+                    if reactor_aborted[i] and current_coolant >= (max_coolant * 0.8) and offFluid == false then
+                        reactor_aborted[i] = false
+                        message("Реактор " .. i .. " готов к работе (уровень восстановился).", colors.msginfo)
+                    end
+                end
+            end
 
             if second % 5 == 0 then
-                consumeSecond = 0
+                consumeSecond = getTotalFluidConsumption()
                 drawStatus()
                 drawFluxRFinfo()
                 if flux_network == true and flux_checked == false then
@@ -3111,18 +3619,33 @@ local function mainLoop()
             if second >= 60 then
                 minute = minute + 1
                 if minute % 10 == 0 then
+                    supportersText = loadSupportersFromURL("https://github.com/P1KaChU337/Reactor-Control-for-OpenComputers/raw/refs/heads/main/supporters.txt")
+                    changelog = loadChangelog("https://github.com/P1KaChU337/Reactor-Control-for-OpenComputers/raw/refs/heads/main/changelog.lua")
                 end
                 if minute >= 60 then
+                    checkVer()
                     hour = hour + 1
                     minute = 0
                 end
                 second = 0
             end
             if MeSecond >= 60 then
-                MeSecond = 0
+                checkFluid()
+                if offFluid == true then
+                    for i = 1, reactors do
+                        if reactor_type[i] == "Fluid" and reactor_work[i] then
+                            stop(i)
+                            updateReactorData(i)
+                            reactor_aborted[i] = true
+                        end
+                    end
+                end
             end
             drawTimeInfo()
             drawWidgets()
+        end
+        if supportersText then
+            drawMarquee(124, 6, supportersText ..  "                            ", 0xF15F2C)
         end
         local eventData = {event.pull(0.05)}
         local eventType = eventData[1]
