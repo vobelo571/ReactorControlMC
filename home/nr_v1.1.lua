@@ -75,7 +75,6 @@ local minute = 0
 local hour = 0
 local testvalue = 0
 local rf = 0
-local ismechecked = false
 local flux_network = false
 local flux_checked = false
 
@@ -91,12 +90,9 @@ local reactor_address    = {}
 local reactors_proxy     = {}
 local reactor_rf         = {}
 local reactor_depletionTime = {}
-local reactor_ConsumptionPerSecond = {}
 local last_me_address = nil
 local me_network = false
 local me_proxy = nil
-local lastValidFluid = 0
-local maxThreshold = 10^12
 local reason = nil
 local depletionTime = 0
 local consumeSecond = 0
@@ -149,8 +145,6 @@ local config = {
     clickArea17 = {x1=widgetCoords[11][1]+5, y1=widgetCoords[11][2]+9, x2=widgetCoords[11][1]+11, y2=widgetCoords[11][2]+10}, -- Реактор 11
     clickArea18 = {x1=widgetCoords[12][1]+5, y1=widgetCoords[12][2]+9, x2=widgetCoords[12][1]+11, y2=widgetCoords[12][2]+10}, -- Реактор 12
     -- Координаты для кнопок в правом меню
-    clickAreaPorogPlus = {x1=124, y1=36, x2=125, y2=33}, -- Кнопка "+ Порог"
-    clickAreaPorogMinus = {x1=126, y1=36, x2=127, y2=33} -- Кнопка "- Порог"
 }
 local colors = {
     bg = 0x202020,
@@ -1244,16 +1238,6 @@ local function drawStatic()
     buffer.drawChanges()
 end
 
-local function getTotalFluidConsumption()
-    local total = 0
-    local consumeSecond = 0
-    
-    for i = 1, #reactors_proxy do
-        local reactor = reactors_proxy[i]
-    end
-    
-    return total
-end
 
 local function drawStatus(num)
     checkReactorStatus()
@@ -2603,8 +2587,6 @@ end
 -- ----------------------------------------------------------------------------------------------------
 
 local function handleTouch(x, y, uuid)
-    local fl_y1 = config.clickAreaPorogPlus.y1
-    if flux_network == true then fl_y1 = config.clickAreaPorogPlus.y2 end
     if y >= config.clickArea1.y1 and
         y <= config.clickArea1.y2 and 
         x >= config.clickArea1.x1 and 
@@ -2885,7 +2867,6 @@ local function mainLoop()
         message("Реакторы не найдены!", colors.msgerror)
         message("Проверьте подключение реакторов!", colors.msgerror, 34)
     end
-    checkFluid()
     if starting == true then
         start()
     end
@@ -2974,7 +2955,7 @@ local function mainLoop()
             end
 
             if second % 5 == 0 then
-                consumeSecond = getTotalFluidConsumption()
+                consumeSecond = 0
                 drawStatus()
                 drawFluxRFinfo()
                 if flux_network == true and flux_checked == false then
