@@ -1868,21 +1868,8 @@ local function detectReactorRodInfo(reactorNum, debugDump)
             return unicode.sub(s, 1, maxLen - 3) .. "..."
         end
 
-        local function summarizeRod(rod)
-            if type(rod) ~= "table" then
-                return "type=" .. type(rod) .. " val=" .. tostring(rod)
-            end
-            local parts = {}
-            if rod.name then table.insert(parts, "name=" .. tostring(rod.name)) end
-            if rod.label then table.insert(parts, "label=" .. tostring(rod.label)) end
-            if rod.damage ~= nil then table.insert(parts, "dmg=" .. tostring(rod.damage)) end
-            if rod.dmg ~= nil then table.insert(parts, "dmg2=" .. tostring(rod.dmg)) end
-            if rod.size ~= nil then table.insert(parts, "size=" .. tostring(rod.size)) end
-            if rod.count ~= nil then table.insert(parts, "count=" .. tostring(rod.count)) end
-            if rod.amount ~= nil then table.insert(parts, "amt=" .. tostring(rod.amount)) end
-            if rod.isEmpty ~= nil then table.insert(parts, "empty=" .. tostring(rod.isEmpty)) end
-            if rod.empty ~= nil then table.insert(parts, "empty2=" .. tostring(rod.empty)) end
-
+        local function maxNumberInRod(rod)
+            if type(rod) ~= "table" then return nil end
             local maxN = nil
             for _, v in pairs(rod) do
                 local n = tonumber(v)
@@ -1896,17 +1883,26 @@ local function detectReactorRodInfo(reactorNum, debugDump)
                     if (not maxN) or n > maxN then maxN = n end
                 end
             end
-            if maxN then table.insert(parts, "maxN=" .. tostring(maxN)) end
+            return maxN
+        end
+
+        local function dbgRodLines(idx, rod, prefix)
+            if not debugDump then return end
+            prefix = tostring(prefix or ("DBG[" .. tostring(idx) .. "]"))
+            if type(rod) ~= "table" then
+                dbg(prefix .. " type=" .. tostring(type(rod)))
+                dbg(prefix .. " val=" .. shortenRight(tostring(rod), 34))
+                return
+            end
 
             local id = extractRodIdentity(rod)
-            if id then table.insert(parts, "id=" .. tostring(id)) end
+            local c = extractRodCount(rod)
+            local maxN = maxNumberInRod(rod)
+            local big = rodHasLargeNumber(rod) and "1" or "0"
 
-            if #parts == 0 then
-                local kcnt = 0
-                for _ in pairs(rod) do kcnt = kcnt + 1 end
-                table.insert(parts, "keys=" .. tostring(kcnt))
-            end
-            return table.concat(parts, " ")
+            dbg(prefix .. " id=" .. shortenRight(tostring(id or "-"), 34 - (unicode.len(prefix) + 4)))
+            dbg(prefix .. " count=" .. tostring(c or "-") .. " big=" .. big)
+            dbg(prefix .. " maxN=" .. tostring(maxN or "-"))
         end
 
         local slotCount = #rods
@@ -2073,11 +2069,11 @@ local function detectReactorRodInfo(reactorNum, debugDump)
         if debugDump then
             dbg("DBG rods slots=" .. tostring(slotCount) .. " lvl=" .. tostring(bestLevel))
             dbg("DBG occ count/id/bigN=" .. tostring(occByCount) .. "/" .. tostring(occById) .. "/" .. tostring(occByBigN))
-            for i = 1, math.min(slotCount, 4) do
-                dbg("DBG[" .. i .. "]: " .. shortenRight(summarizeRod(rods[i]), 34))
+            for i = 1, math.min(slotCount, 3) do
+                dbgRodLines(i, rods[i], "DBG[" .. tostring(i) .. "]")
             end
             if firstEmptyIdx then
-                dbg("DBG empty[" .. tostring(firstEmptyIdx) .. "]: " .. shortenRight(summarizeRod(rods[firstEmptyIdx]), 34))
+                dbgRodLines(firstEmptyIdx, rods[firstEmptyIdx], "DBG empty[" .. tostring(firstEmptyIdx) .. "]")
             end
 
             -- Пишем расширенный дамп в файл, чтобы ничего не терялось в правом окне.
@@ -2090,7 +2086,10 @@ local function detectReactorRodInfo(reactorNum, debugDump)
                 f:write("occByCount=" .. tostring(occByCount) .. " occById=" .. tostring(occById) .. " occByBigN=" .. tostring(occByBigN) .. "\n\n")
                 local dumpN = math.min(slotCount, 12)
                 for i = 1, dumpN do
-                    f:write("[" .. i .. "] " .. summarizeRod(rods[i]) .. "\n")
+                    local rid = extractRodIdentity(rods[i])
+                    local rc = extractRodCount(rods[i])
+                    local rmax = maxNumberInRod(rods[i])
+                    f:write("[" .. i .. "] id=" .. tostring(rid) .. " count=" .. tostring(rc) .. " maxN=" .. tostring(rmax) .. "\n")
                     if type(rods[i]) == "table" then
                         local keys = {}
                         for k, v in pairs(rods[i]) do
