@@ -1305,16 +1305,17 @@ local function drawTimeInfo()
     for i = 0, 35 - 1 do
         buffer.drawText(123 + i, fl_y1+1, colors.bg2, brailleChar(brail_console[2]))
     end
-    buffer.drawText(124, fl_y1, colors.textclr, "Время работы:")
+    buffer.drawText(124, fl_y1, colors.textclr, "МЭ: Обн. ч/з..")
+    buffer.drawText(141, fl_y1, colors.textclr, "Время работы:")
     buffer.drawText(139, fl_y1, colors.bg2, brailleChar(brail_cherta[1]))
     buffer.drawText(139, fl_y1+1, colors.bg2, brailleChar(brail_cherta[2]))
     buffer.drawText(139, fl_y1+2, colors.bg2, brailleChar(brail_cherta[1]))
     buffer.drawText(139, fl_y1+3, colors.bg2, brailleChar(brail_cherta[1]))
     drawDigit(125, fl_y1+2, brail_time, 0xaa4b2e)
     -- ---------------------------------------------------------------------------
-    buffer.drawRectangle(118, fl_y1+2, 21, 2, colors.bg, 0, " ")
-
-    drawNumberWithText(125, fl_y1+2, (me_network and (60 - MeSecond) or 0), 2, colors.textclr, "Sec", colors.textclr)
+    buffer.drawRectangle(127, fl_y1+2, 12, 2, colors.bg, 0, " ")
+    
+    drawNumberWithText(134, fl_y1+2, (me_network and (60 - MeSecond) or 0), 2, colors.textclr, "Sec", colors.textclr)
     
     buffer.drawRectangle(140, fl_y1+2, 18, 2, colors.bg, 0, " ")
 
@@ -1915,18 +1916,8 @@ local function detectReactorRodInfo(reactorNum)
         reactor_rodLevel[reactorNum] = bestLevel
 
         local slotCount = math.max(bestLevel * 3, #rods)
-        local present = 0
+        local present = slotCount * bestLevel
         local expected = slotCount * bestLevel
-
-        -- Подсчитываем реальное количество стержней
-        for _, rod in ipairs(rods) do
-            if type(rod) == "table" then
-                local id = extractRodIdentity(rod)
-                if id then
-                    present = present + bestLevel
-                end
-            end
-        end
 
         local bestType, bestTypeCount = nil, 0
         local distinctTypes = 0
