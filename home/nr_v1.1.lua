@@ -4095,28 +4095,40 @@ local function mainLoop()
 end
 
 -- ----------------------------------------------------------------------------------------------------
+local function safeTraceback(err)
+    local msg = tostring(err)
+    if debug and type(debug.traceback) == "function" then
+        local ok, trace = pcall(debug.traceback, msg, 2)
+        if ok and type(trace) == "string" then
+            return trace
+        end
+    end
+    return msg
+end
+
 local lastCrashTime = 0
 while not exit do
-    local ok, err = xpcall(mainLoop, debug.traceback)
+    local ok, err = xpcall(mainLoop, safeTraceback)
     if not ok then
         local now = computer.uptime() -- Заменил os.time() на computer.uptime()
+        local errStr = tostring(err)
 
-        if tostring(err):lower():find("interrupted") or exit == true then
+        if errStr:lower():find("interrupted") or exit == true then
             return
         end
         
         if now - lastCrashTime < 5 then
-            logError("FAILSAFE: Rapid crashing detected.")
-            message("Rapid crashing detected.", 0xff0000, 34)
+            pcall(logError, "FAILSAFE: Rapid crashing detected.")
+            pcall(message, "Rapid crashing detected.", 0xff0000, 34)
             os.sleep(5)
         end
         lastCrashTime = now
 
-        logError("Global Error:")
-        logError(err)
-        message("Code: " .. tostring(err), 0xff0000, 34)
-        message("Global Error!", 0xff0000, 34)
-        message("Restarting in 3 seconds...", 0xffa500, 34)
+        pcall(logError, "Global Error:")
+        pcall(logError, errStr)
+        pcall(message, "Code: " .. errStr, 0xff0000, 34)
+        pcall(message, "Global Error!", 0xff0000, 34)
+        pcall(message, "Restarting in 3 seconds...", 0xffa500, 34)
     
         os.sleep(3)
     end
