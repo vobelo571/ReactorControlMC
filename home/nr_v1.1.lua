@@ -158,9 +158,6 @@ local config = {
     clickArea16 = {x1=widgetCoords[10][1]+5, y1=widgetCoords[10][2]+9, x2=widgetCoords[10][1]+11, y2=widgetCoords[10][2]+10}, -- Реактор 10
     clickArea17 = {x1=widgetCoords[11][1]+5, y1=widgetCoords[11][2]+9, x2=widgetCoords[11][1]+11, y2=widgetCoords[11][2]+10}, -- Реактор 11
     clickArea18 = {x1=widgetCoords[12][1]+5, y1=widgetCoords[12][2]+9, x2=widgetCoords[12][1]+11, y2=widgetCoords[12][2]+10}, -- Реактор 12
-    -- Координаты для кнопок в правом меню
-    clickAreaPorogPlus = {x1=124, y1=36, x2=125, y2=33}, -- Кнопка "+ Порог"
-    clickAreaPorogMinus = {x1=126, y1=36, x2=127, y2=33} -- Кнопка "- Порог"
 }
 local colors = {
     bg = 0x202020,
@@ -1198,7 +1195,6 @@ local function drawTimeInfo()
     for i = 0, 35 - 1 do
         buffer.drawText(123 + i, fl_y1+1, colors.bg2, brailleChar(brail_console[2]))
     end
-    buffer.drawText(124, fl_y1, colors.textclr, "МЭ: выкл.")
     buffer.drawText(141, fl_y1, colors.textclr, "Время работы:")
     buffer.drawText(139, fl_y1, colors.bg2, brailleChar(brail_cherta[1]))
     buffer.drawText(139, fl_y1+1, colors.bg2, brailleChar(brail_cherta[2]))
@@ -1208,7 +1204,6 @@ local function drawTimeInfo()
     -- ---------------------------------------------------------------------------
     buffer.drawRectangle(127, fl_y1+2, 12, 2, colors.bg, 0, " ")
     
-    drawNumberWithText(134, fl_y1+2, 0, 2, colors.textclr, "Sec", colors.textclr)
     
     buffer.drawRectangle(140, fl_y1+2, 18, 2, colors.bg, 0, " ")
 
@@ -1336,8 +1331,6 @@ local function drawStatus(num)
 
     -- Сдвиг x с 88 на 90
     buffer.drawText(90, 46, colors.textclr, "Кол-во реакторов: " .. reactors)
-    buffer.drawText(90, 47, colors.textclr, "Общее потребление")
-    buffer.drawText(90, 48, colors.textclr, "жидкости: " .. consumeSecond .. " Mb/s")
 
     if any_reactor_on == true then
         -- Сдвиг координат индикатора (110->112, 111->113, 115->117)
@@ -1552,11 +1545,6 @@ local function drawDynamic()
     end
     buffer.drawText(124, 3, colors.textclr, "Информационное окно отладки:")
     drawStatus()
-    -- -----------------------------------------------------------
-    drawFluidinfo()
-
-    -- -----------------------------------------------------------
-    drawPorog()
 
     -- -----------------------------------------------------------
     drawFluxRFinfo()
@@ -1711,7 +1699,6 @@ local function checkFluid()
     offFluid = false
     reason = nil
     ismechecked = false
-    drawFluidinfo()
 end
 
 function onInterrupt()
@@ -1954,12 +1941,6 @@ local function drawSettingsMenu()
     -- Заголовки
     buffer.drawText(modalX + 11, modalY + 1, 0x000000, "Меню настроек приложения ReactorControl v" .. version .. "." .. build)
 
-    buffer.drawText(modalX + 7, modalY + 3, 0x000000, "Порог жидкости")
-    createSearchField(modalX + 3, modalY + 5, 22, "Введите порог(Mb)")
-    searchFields[1].text = tostring(porog)
-    local offset = unicode.len(searchFields[1].text) + 1
-    searchFields[1].cursorPos = offset
-
     buffer.drawText(modalX + 5, modalY + 7, 0x000000, "Тема по умолчанию")
     animatedButton(1, modalX + 4, modalY + 8, "Светлая      ", nil, nil, 20, nil, nil, 0x444444, 0xffffff)
     local sw1_x, sw1_y, sw1_w = modalX+16, modalY+9, 7
@@ -2018,7 +1999,7 @@ local function drawSettingsMenu()
                 buffer.drawText(modalX + 31, y, 0xcbcbcb, shortenNameCentered("* Пусто *", winW - 2))
             end
         end
-        removeSearchField(2)
+        removeSearchField(1)
         createSearchField(modalX + 30, modalY + 20, 24, placeholder, false, 0x353535, 0x333333, clr)
         animatedButton(1, modalX + 56, modalY + 19, "ADD", nil, nil, 5, nil, nil, 0x37c72a, 0xffffff) -- 0x21ff21
         drawAllFields()
@@ -2059,7 +2040,6 @@ local function drawSettingsMenu()
 
     local themetoggle = theme
 
-    local NSporog = porog
     local NSTheme = theme
     local NSUpdateCheck = updateCheck
     local NSDebugLog = debugLog
@@ -2127,7 +2107,6 @@ local function drawSettingsMenu()
                     start()
                 end
                 theme = NSTheme
-                porog = NSporog
                 updateCheck = NSUpdateCheck
                 debugLog = NSDebugLog
                 users = NSusers
@@ -2189,7 +2168,7 @@ local function drawSettingsMenu()
                 animatedButton(1, modalX + 56, modalY + 19, "ADD", nil, nil, 5, nil, nil, 0x37c72a, 0xffffff) -- 0x21ff21
                 local placehold
                 local placeclr
-                local newNick = searchFields[2].text:match("^%s*(.-)%s*$") -- trim
+                local newNick = searchFields[1].text:match("^%s*(.-)%s*$") -- trim
                 if newNick == "" then
                     -- buffer.drawText(modalX + 30, modalY + 20, 0xff0000, "Никнейм не может быть пустым!")
                     -- msgModal(modalX + 18, modalY + 24, 29, 3, 0xcccccc, "Никнейм не может быть пустым!", 0xff0000)
@@ -2221,7 +2200,6 @@ local function drawSettingsMenu()
                 animatedButton(1, modalX + 5, modalY + modalH - 4, "Сохранить и выйти", nil, nil, 18, nil, nil, 0x8100cc, 0xffffff)
                 buffer.drawChanges()
                 -- Сохраняем настройки
-                porog = tonumber(searchFields[1].text) or porog
                 theme = sw1_state
                 updateCheck = sw2_state
                 debugLog = sw3_state
@@ -2258,19 +2236,9 @@ local function drawSettingsMenu()
                             f.cursorPos = f.cursorPos + 1
                         end
                     elseif char >= 32 and char <= 126 then -- Печатаемые символы
-                        if i == 1 then -- Поле порога жидкости - только цифры
-                            local c = string.char(char)
-                            if c:match("%d") then
-                                f.text = f.text:sub(1, f.cursorPos - 1)
-                                    .. c
-                                    .. f.text:sub(f.cursorPos)
-                                f.cursorPos = f.cursorPos + 1
-                            end
-                        else -- всё остальное - любые символы
-                            local c = string.char(char) 
-                            f.text = f.text:sub(1, f.cursorPos - 1) .. c .. f.text:sub(f.cursorPos) 
-                            f.cursorPos = f.cursorPos + 1 
-                        end
+                        local c = string.char(char) 
+                        f.text = f.text:sub(1, f.cursorPos - 1) .. c .. f.text:sub(f.cursorPos) 
+                        f.cursorPos = f.cursorPos + 1 
                     elseif code == 28 then -- Enter
                         f.active = false
                         f.cursorVisible = false
@@ -2950,8 +2918,6 @@ end
 -- ----------------------------------------------------------------------------------------------------
 
 local function handleTouch(x, y, uuid)
-    local fl_y1 = config.clickAreaPorogPlus.y1
-    if flux_network == true then fl_y1 = config.clickAreaPorogPlus.y2 end
     if y >= config.clickArea1.y1 and
         y <= config.clickArea1.y2 and 
         x >= config.clickArea1.x1 and 
@@ -3166,35 +3132,6 @@ local function handleTouch(x, y, uuid)
         os.sleep(0.2)
         animatedButton(1, 68, 47, "Метрика: " .. status_metric, nil, nil, 18, nil, nil, colors.whitebtn)
         drawDynamic()
-    elseif
-    
-        y >= fl_y1 and
-        y <= fl_y1 and 
-        x >= config.clickAreaPorogPlus.x1 and 
-        x <= config.clickAreaPorogPlus.x2 then
-
-        porog = porog + 2500
-        saveCfg()
-        drawDigit(124, fl_y1, brail_greenbtn, 0x5f9300)
-        buffer.drawChanges()
-        os.sleep(0.2)
-        drawPorog()
-    elseif
-        y >= fl_y1 and
-        y <= fl_y1 and
-        x >= config.clickAreaPorogMinus.x1 and
-        x <= config.clickAreaPorogMinus.x2 then
-        if porog > 0 then
-            porog = porog - 2500
-            saveCfg()
-            if porog == 27500 then
-                message("Порог ниже рекомендованного!", colors.msgwarn)
-            end     
-        end
-        drawDigit(126, fl_y1, brail_redbtn, 0x9d0000)
-        buffer.drawChanges()
-        os.sleep(0.2)
-        drawPorog()
     end
     for i = 1, reactors do
         local clickArea = config["clickArea" .. (6 + i)]
@@ -3330,7 +3267,6 @@ local function mainLoop()
                 reactor_aborted[i] = true
             end
         end
-        drawFluidinfo()
         drawWidgets()
     end
     -- checkVer()
@@ -3364,7 +3300,6 @@ local function mainLoop()
                         stop(i)
                         updateReactorData(i)
                         reactor_aborted[i] = true
-                        drawFluidinfo()
                         drawWidgets()
                     end
                 end
