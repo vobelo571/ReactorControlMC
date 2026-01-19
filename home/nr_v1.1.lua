@@ -41,7 +41,7 @@ if not fs.exists(configPath) then
         file:write("-- Прежде чем что-то изменять, пожалуйста внимательно читайте описание!\n\n")
         file:write("porog = 50000 -- Минимальное значение порога жидкости в mB\n\n")
         file:write("-- Впишите никнеймы игроков которым будет разрешеннен доступ к ПК, обязательно ради вашей безопасности!\n")
-        file:write("users = {} -- Пример: {\"P1KaChU337\", \"Nickname1\"} -- Именно что с кавычками и запятыми!\n")
+        file:write("users = {} -- Пример: {\"Flixmo\", \"Nickname1\"} -- Именно что с кавычками и запятыми!\n")
         file:write("usersold = {} -- Не трогайте, может заблокировать ПК!\n\n")
         file:write("-- Тема интерфейса в системе по стандарту\n")
         file:write("theme = false -- (false темная, true светлая)\n\n")
@@ -121,7 +121,7 @@ local chatCommands = {
     ["@stop"] = true,
     ["@restart"] = true,
     ["@exit"] = true,
-    ["@changelog"] = true,
+    -- ["@changelog"] = true,
     ["@useradd"] = true,
     ["@userdel"] = true,
     ["@info"] = true
@@ -381,7 +381,7 @@ local function saveCfg(param)
             file:write(", ")
         end
     end
-    file:write("} -- Пример: {\"P1KaChU337\", \"Nickname1\"} -- Именно что с кавычками и запятыми!\n")
+    file:write("} -- Пример: {\"Flixmo\", \"Nickname1\"} -- Именно что с кавычками и запятыми!\n")
 
     file:write("usersold = {")
     for i, user in ipairs(usersold) do
@@ -1018,10 +1018,10 @@ local function drawRightMenu()
         buffer.drawText(124, 4 + i, baseColor, entry.text or "", alpha)
     end
 
-    if supportersText then
-        buffer.drawText(124, 5, colors.textclr, "Спасибо за поддержку:")
-        drawMarquee(124, 6, supportersText ..  "                            ", 0xF15F2C)
-    end
+    -- if supportersText then
+    --     buffer.drawText(124, 5, colors.textclr, "Спасибо за поддержку:")
+    --     drawMarquee(124, 6, supportersText ..  "                            ", 0xF15F2C)
+    -- end
     
     buffer.drawChanges()
 end
@@ -1296,7 +1296,7 @@ local function drawStatic()
     animatedButton(1, 41, 47, "Выход из программы.", nil, nil, 23, nil, nil, colors.whitebtn)
     animatedButton(1, 68, 47, "Метрика: " .. status_metric, nil, nil, 18, nil, nil, colors.whitebtn)
 
-    buffer.drawText(123, 50, (theme and 0xc3c3c3 or 0x666666), "Reactor Control v" .. version .. "." .. build .. " by P1KaChU337")
+    buffer.drawText(123, 50, (theme and 0xc3c3c3 or 0x666666), "Reactor Control v" .. version .. "." .. build .. " by Flixmo")
     -- buffer.drawText(130, 50, (theme and 0xc3c3c3 or 0x666666), "by P1KaChU337") -- Контакты: VK: @p1kachu337, Discord: p1kachu337 TG: @sh1zurz
     
     buffer.drawChanges()
@@ -2482,14 +2482,8 @@ local function drawInfoMenu()
         return maxScroll
     end
 
-    local infotext = {
-        "Автор программы: P1KaChU337",
-        "",
-        "Контакты: vk.com/p1kachu337, Discord: p1kachu337, Telegram: @sh1zurz",
-        "",
-        "GitHub проекта: github.com/P1KaChU337/Reactor-Control-for-OpenComputers",
-        "",
-        "Поддержать проект можно, предварительно связавшись со мной для согласования способа поддержки (на карту, boosty, или иной подарок).",
+    local     infotext = {
+        "Автор программы: Flixmo",
         "",
         "Лицензия: MIT License",
         "",
@@ -2531,7 +2525,7 @@ local function drawInfoMenu()
     local licenseText = {
         "MIT License", 
         "",
-        "Copyright (c) 2025 P1KaChU337",
+        "Copyright (c) 2025 Flixmo",
         "",
         "English Version",
         "Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the \"Software\"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions: The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.",
@@ -2706,7 +2700,7 @@ local function checkVer()
             for _, c in ipairs(cornerPos) do
                 buffer.drawText(c[1], c[2], 0xcccccc, brailleChar(brail_status[c[3]]))
             end
-            buffer.drawText(45, 23, 0x000000, "Доступно обновление Reactor Control by P1KaChU337 (v" .. progVer ..", --> v" .. newVer .. ").")
+            buffer.drawText(45, 23, 0x000000, "Доступно обновление Reactor Control by Flixmo (v" .. progVer ..", --> v" .. newVer .. ").")
             buffer.drawText(43, 24, 0x000000, "Нажмите \"ОК\" для продолжения без обновления или \"Установить\" для обновления.")
             animatedButton(1, 70, 25, "Ок", nil, nil, 6, nil, nil, 0x8100cc, 0xffffff)
             animatedButton(1, 80, 25, "Установить", nil, nil, 10, nil, nil, 0x8100cc, 0xffffff)    
@@ -2835,7 +2829,6 @@ local function handleChatCommand(nick, msg, args)
             chatBox.say("§a@stop - остановка всех реакторов (или @stop 1 для остановки только 1-го)")
             chatBox.say("§a@exit - выход из программы")
             chatBox.say("§a@restart - перезагрузка компьютера")
-            chatBox.say("§a@changelog - показать изменения в обновлениях(пример: @changelog 1.1.1)") -- Скачивается массив из гитхаба в массиве ченджлог выглядит так {"1.0.0 - описание, переносы строк и тп, все учитывать и выводить в чат","1.0.1 - описание","1.1.0 - описание"}
         end
         
     elseif msg:match("^@status") then
@@ -2934,9 +2927,7 @@ local function handleChatCommand(nick, msg, args)
     elseif msg == "@info" then
         if isChatBox then
             chatBox.say("§bReactor Control v" .. version .. " Build " .. build)
-            chatBox.say("§aАвтор: §eP1KaChU337")
-            chatBox.say("§aGitHub: §1https://github.com/P1KaChU337/Reactor-Control-for-OpenComputers")
-            chatBox.say("§aПоддержать автора на §6Boosty: §1https://boosty.to/p1kachu337")
+            chatBox.say("§aАвтор: §eFlixmo")
             chatBox.say("§aИгроки с доступом: §5" .. table.concat(users, ", "))
             chatBox.say("§aСпасибо за использование программы!")
         end
@@ -3000,35 +2991,35 @@ local function handleChatCommand(nick, msg, args)
             chatBox.say("§aИспользование: @userdel <ник>")
         end
 
-    elseif msg:match("^@changelog") then
-        local versionReq = args:match("^(%S+)")
-        if not changelog then
-            chatBox.say("§cОшибка загрузки changelog.lua!")
-            return
-        end
+    -- elseif msg:match("^@changelog") then
+    --     local versionReq = args:match("^(%S+)")
+    --     if not changelog then
+    --         chatBox.say("§cОшибка загрузки changelog.lua!")
+    --         return
+    --     end
 
-        if versionReq then
-            local found = false
-            for _, entry in ipairs(changelog) do
-                if entry.version == versionReq then
-                    chatBox.say("§eИзменения в версии " .. entry.version .. ":")
-                    for _, line in ipairs(entry.changes) do
-                        chatBox.say("§a- " .. line)
-                    end
-                    found = true
-                    break
-                end
-            end
-            if not found then
-                chatBox.say("§cВерсия " .. versionReq .. " не найдена в ченджлоге!")
-            end
-        else
-            chatBox.say("§eДоступные версии:")
-            for _, entry in ipairs(changelog) do
-                chatBox.say("§a" .. entry.version)
-            end
-            chatBox.say("§aИспользуйте: @changelog <версия>")
-        end
+    --     if versionReq then
+    --         local found = false
+    --         for _, entry in ipairs(changelog) do
+    --             if entry.version == versionReq then
+    --                 chatBox.say("§eИзменения в версии " .. entry.version .. ":")
+    --                 for _, line in ipairs(entry.changes) do
+    --                     chatBox.say("§a- " .. line)
+    --                 end
+    --                 found = true
+    --                 break
+    --             end
+    --         end
+    --         if not found then
+    --             chatBox.say("§cВерсия " .. versionReq .. " не найдена в ченджлоге!")
+    --         end
+    --     else
+    --         chatBox.say("§eДоступные версии:")
+    --         for _, entry in ipairs(changelog) do
+    --             chatBox.say("§a" .. entry.version)
+    --         end
+    --         chatBox.say("§aИспользуйте: @changelog <версия>")
+    --     end
 
     elseif msg == "@restart" then
         if isChatBox then
@@ -3408,7 +3399,7 @@ local function mainLoop()
     drawStatic()
     drawDynamic()
     message("------Reactor Control v" .. version .. "-------", 0x72f8ff)
-    message("Автор приложения: P1KaChU337", 0x72f8ff)
+    message("Автор приложения: Flixmo", 0x72f8ff)
     message("Версия приложения: " .. version .. ", Build " .. build, 0x72f8ff)
     message("Авто-обновление: " .. (updateCheck and "Включенно" or "Выключенно"), 0x72f8ff, 34)
     message("Реакторов найдено: " .. reactors, 0x72f8ff)
@@ -3419,8 +3410,8 @@ local function mainLoop()
     message(" ")
     userUpdate()
     message("Инициализация реакторов...", colors.textclr)
-    supportersText = loadSupportersFromURL("https://github.com/P1KaChU337/Reactor-Control-for-OpenComputers/raw/refs/heads/main/supporters.txt")
-    changelog = loadChangelog("https://github.com/P1KaChU337/Reactor-Control-for-OpenComputers/raw/refs/heads/main/changelog.lua")
+    -- supportersText = loadSupportersFromURL("https://github.com/P1KaChU337/Reactor-Control-for-OpenComputers/raw/refs/heads/main/supporters.txt")
+    -- changelog = loadChangelog("https://github.com/P1KaChU337/Reactor-Control-for-OpenComputers/raw/refs/heads/main/changelog.lua")
     updateReactorData()
     if reactors ~= 0 then
         message("Реакторы инициализированы!", colors.msginfo, 34)
@@ -3464,7 +3455,7 @@ local function mainLoop()
         drawFluidinfo()
         drawWidgets()
     end
-    checkVer()
+    -- checkVer()
     if isFirstStart == true then
         drawSettingsMenu()
         message("Первый запуск программы завершен!", colors.msginfo)
@@ -3618,12 +3609,12 @@ local function mainLoop()
             end
             if second >= 60 then
                 minute = minute + 1
-                if minute % 10 == 0 then
-                    supportersText = loadSupportersFromURL("https://github.com/P1KaChU337/Reactor-Control-for-OpenComputers/raw/refs/heads/main/supporters.txt")
-                    changelog = loadChangelog("https://github.com/P1KaChU337/Reactor-Control-for-OpenComputers/raw/refs/heads/main/changelog.lua")
-                end
+                -- if minute % 10 == 0 then
+                --     supportersText = loadSupportersFromURL("https://github.com/P1KaChU337/Reactor-Control-for-OpenComputers/raw/refs/heads/main/supporters.txt")
+                --     changelog = loadChangelog("https://github.com/P1KaChU337/Reactor-Control-for-OpenComputers/raw/refs/heads/main/changelog.lua")
+                -- end
                 if minute >= 60 then
-                    checkVer()
+                    -- checkVer()
                     hour = hour + 1
                     minute = 0
                 end
@@ -3644,9 +3635,9 @@ local function mainLoop()
             drawTimeInfo()
             drawWidgets()
         end
-        if supportersText then
-            drawMarquee(124, 6, supportersText ..  "                            ", 0xF15F2C)
-        end
+        -- if supportersText then
+        --     drawMarquee(124, 6, supportersText ..  "                            ", 0xF15F2C)
+        -- end
         local eventData = {event.pull(0.05)}
         local eventType = eventData[1]
         if eventType == "touch" then
