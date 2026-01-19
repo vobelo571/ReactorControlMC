@@ -526,6 +526,14 @@ local function shortenNameCentered(name, maxLength)
     return centerText(name, maxLength)
 end
 
+local function shortenText(text, maxLength)
+    maxLength = maxLength or 18
+    if unicode.len(text) > maxLength then
+        return unicode.sub(text, 1, maxLength - 3) .. "..."
+    end
+    return text
+end
+
 -- local function centerMSG(x, y, msg, color)
 --     local len = unicode.len(msg)
 --     local startX = x - math.floor(len / 2)
@@ -774,13 +782,13 @@ local function drawWidgets()
     for i = 1, math.min(reactors, #widgetCoords) do
         if reactor_aborted[i] == false then
             local x, y = widgetCoords[i][1], widgetCoords[i][2]
-            buffer.drawRectangle(x + 1, y, 20, 11, colors.bg, 0, " ")
-            buffer.drawRectangle(x, y + 1, 22, 9, colors.bg, 0, " ")
+            buffer.drawRectangle(x + 1, y, 20, 12, colors.bg, 0, " ")
+            buffer.drawRectangle(x, y + 1, 22, 10, colors.bg, 0, " ")
 
             buffer.drawText(x,  y,  colors.bg, brailleChar(brail_status[1]))
             buffer.drawText(x + 21, y,  colors.bg, brailleChar(brail_status[2]))
-            buffer.drawText(x + 21, y + 10,  colors.bg, brailleChar(brail_status[3]))
-            buffer.drawText(x,  y + 10,  colors.bg, brailleChar(brail_status[4]))
+            buffer.drawText(x + 21, y + 11,  colors.bg, brailleChar(brail_status[3]))
+            buffer.drawText(x,  y + 11,  colors.bg, brailleChar(brail_status[4]))
 
             if reactor_work[i] then
                 if (reactor_depletionTime[i] or 0) <= 0 then
@@ -804,19 +812,20 @@ local function drawWidgets()
             buffer.drawText(x + 4,  y + 5,  colors.textclr, "Запущен: " .. (reactor_work[i] and "Да" or "Нет"))
             buffer.drawText(x + 4,  y + 6,  colors.textclr, "Распад: " .. secondsToHMS(reactor_depletionTime[i] or 0))
             buffer.drawText(x + 4,  y + 7,  colors.textclr, "Потреб: " .. (reactor_type[i] == "Fluid" and reactor_ConsumptionPerSecond[i] or "0") .. " mB/s")
-            animatedButton(1, x + 6, y + 8, (reactor_work[i] and "Отключить" or "Включить"), nil, nil, 10, nil, nil, (reactor_work[i] and 0xfd3232 or 0x2beb1a))
+            buffer.drawText(x + 4,  y + 8,  colors.textclr, shortenText("Стержни: " .. (reactor_rod_summary[i] or "н/д"), 18))
+            animatedButton(1, x + 6, y + 9, (reactor_work[i] and "Отключить" or "Включить"), nil, nil, 10, nil, nil, (reactor_work[i] and 0xfd3232 or 0x2beb1a))
             if reactor_type[i] == "Fluid" then
                 drawVerticalProgressBar(x + 1, y + 1, 9, reactor_getcoolant[i], reactor_maxcoolant[i], 0x0044FF, 0x00C8FF, colors.bg2)
             end
         else
             local x, y = widgetCoords[i][1], widgetCoords[i][2]
-            buffer.drawRectangle(x + 1, y, 20, 11, colors.msgwarn, 0, " ")
-            buffer.drawRectangle(x, y + 1, 22, 9, colors.msgwarn, 0, " ")
+            buffer.drawRectangle(x + 1, y, 20, 12, colors.msgwarn, 0, " ")
+            buffer.drawRectangle(x, y + 1, 22, 10, colors.msgwarn, 0, " ")
 
             buffer.drawText(x,  y,  colors.msgwarn, brailleChar(brail_status[1]))
             buffer.drawText(x + 21, y,  colors.msgwarn, brailleChar(brail_status[2]))
-            buffer.drawText(x + 21, y + 10,  colors.msgwarn, brailleChar(brail_status[3]))
-            buffer.drawText(x,  y + 10,  colors.msgwarn, brailleChar(brail_status[4]))
+            buffer.drawText(x + 21, y + 11,  colors.msgwarn, brailleChar(brail_status[3]))
+            buffer.drawText(x,  y + 11,  colors.msgwarn, brailleChar(brail_status[4]))
 
             buffer.drawText(x + 6,  y + 1,  colors.msgerror, "Реактор #" .. i)
             buffer.drawText(x + 4,  y + 3,  colors.msgerror, "Нагрев: " .. (temperature[i] or "-") .. "°C")
