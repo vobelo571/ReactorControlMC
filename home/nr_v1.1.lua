@@ -111,6 +111,8 @@ local reactor_rodLevel = {}
 
 -- forward declaration: start() uses it before the definition block below
 local updateReactorRodsState
+-- forward declaration: drawWidgets() uses it before definition block below
+local getReactorKey
 
 local last_me_address = nil
 local me_network = false
@@ -1719,7 +1721,7 @@ local function normalizeRodType(idStr)
     return nil
 end
 
-local function getReactorKey(i)
+getReactorKey = function(i)
     return reactor_address[i] or tostring(i)
 end
 
