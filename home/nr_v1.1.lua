@@ -1857,6 +1857,7 @@ local function detectReactorRodInfo(reactorNum)
         local presentRods = 0
         local typeCounts = {}
         local multCounts = {}
+        local levelCounts = {}
 
         local function addType(rawId)
             local t = normalizeRodType(rawId) or tostring(rawId or "")
@@ -1870,6 +1871,12 @@ local function detectReactorRodInfo(reactorNum)
             multCounts[m] = (multCounts[m] or 0) + 1
         end
 
+        local function addLevelCandidate(n)
+            n = tonumber(n)
+            if not n or n < 2 or n > 64 then return end
+            levelCounts[n] = (levelCounts[n] or 0) + 1
+        end
+
         for _, rod in ipairs(rods) do
             if type(rod) == "table" then
                 local id = extractRodIdentity(rod)
@@ -1878,6 +1885,13 @@ local function detectReactorRodInfo(reactorNum)
                     local rodCount = tonumber(rod.size) or tonumber(rod.count) or 1
                     presentRods = presentRods + rodCount
                     addType(id)
+
+                    -- уровень берём по моде среди маленьких чисел в записи rod[...] (включая строковые "6"), исключая rod.size
+                    for _, n in ipairs(collectSmallIntsOnce(rod)) do
+                        if n ~= rodCount then  -- исключаем rod.size
+                            addLevelCandidate(n)
+                        end
+                    end
 
                     local strings = collectStrings(rod)
                     for _, s in ipairs(strings) do
@@ -1891,12 +1905,20 @@ local function detectReactorRodInfo(reactorNum)
             end
         end
 
-        local bestLevel = getReactorLevel(proxy)
+        local bestLevel, bestLevelCount = 1, 0
+        for lvl, c in pairs(levelCounts) do
+            if c > bestLevelCount then
+                bestLevel, bestLevelCount = lvl, c
+            end
+        end
+        if bestLevelCount == 0 then
+            bestLevel = getReactorLevel(proxy)
+        end
         if bestLevel < 1 then bestLevel = 1 end
         reactor_rodLevel[reactorNum] = bestLevel
 
         local present = presentRods
-        local expected = slotCount * bestLevel
+        local expected = (presentRods == 0) and 0 or (slotCount * bestLevel)
 
         local bestType, bestTypeCount = nil, 0
         local distinctTypes = 0
@@ -1978,6 +2000,13 @@ local function getReactorRodsNeed(reactorNum)
     local totals = {}
     local distinct = 0
     local lastKey = nil
+    local levelCounts = {}
+
+    local function addLevel(n)
+        n = tonumber(n)
+        if not n or n <= 0 then return end
+        levelCounts[n] = (levelCounts[n] or 0) + 1
+    end
 
     local function addNeed(filter, count)
         count = tonumber(count) or 0
@@ -2023,6 +2052,7 @@ local function getReactorRodsNeed(reactorNum)
                 if label and not name then filter.label = label end
                 local key = tostring(filter.name or "") .. "|" .. tostring(filter.damage or "") .. "|" .. tostring(filter.label or "")
                 totals[key] = (totals[key] or 0) + (tonumber(count) or 0)
+                addLevel(count)
                 lastKey = key
             end
         end
@@ -2032,7 +2062,15 @@ local function getReactorRodsNeed(reactorNum)
 
     -- если тип стержня один: заказываем до полного заполнения (слоты * уровень)
     if distinct == 1 and lastKey then
-        local bestLevel = tonumber(reactor_rodLevel[reactorNum]) or getReactorLevel(proxy)
+        local bestLevel, bestLevelCount = 1, 0
+        for lvl, c in pairs(levelCounts) do
+            if c > bestLevelCount then
+                bestLevel, bestLevelCount = lvl, c
+            end
+        end
+        if bestLevelCount == 0 then
+            bestLevel = tonumber(reactor_rodLevel[reactorNum]) or getReactorLevel(proxy)
+        end
         if bestLevel < 1 then bestLevel = 1 end
 
         local desired = (#rods) * bestLevel
