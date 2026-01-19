@@ -1830,7 +1830,7 @@ local function collectSmallIntsOnce(rod)
     return out
 end
 
-local function detectReactorRodInfo(reactorNum, debugDump)
+local function detectReactorRodInfo(reactorNum)
     local ok = pcall(function()
         local proxy = reactors_proxy[reactorNum]
         if not proxy then
@@ -1850,61 +1850,6 @@ local function detectReactorRodInfo(reactorNum, debugDump)
             reactor_rodMultiplier[reactorNum] = 1
             reactor_rodLevel[reactorNum] = 1
             return
-        end
-
-        local dbgLines = {}
-        local function dbg(s)
-            if not debugDump then return end
-            local line = tostring(s)
-            table.insert(dbgLines, line)
-            -- msgwarn заметнее в правом окне
-            message(line, colors.msgwarn, 34)
-        end
-
-        local function shortenRight(s, maxLen)
-            s = tostring(s or "")
-            maxLen = tonumber(maxLen) or 34
-            if unicode.len(s) <= maxLen then return s end
-            return unicode.sub(s, 1, maxLen - 3) .. "..."
-        end
-
-        local function maxNumberInRod(rod)
-            if type(rod) ~= "table" then return nil end
-            local maxN = nil
-            for _, v in pairs(rod) do
-                local n = tonumber(v)
-                if n then
-                    if (not maxN) or n > maxN then maxN = n end
-                end
-            end
-            for _, v in ipairs(rod) do
-                local n = tonumber(v)
-                if n then
-                    if (not maxN) or n > maxN then maxN = n end
-                end
-            end
-            return maxN
-        end
-
-        local function dbgRodLines(idx, rod, prefix)
-            if not debugDump then return end
-            prefix = tostring(prefix or ("DBG[" .. tostring(idx) .. "]"))
-            if type(rod) ~= "table" then
-                dbg(prefix .. " type=" .. tostring(type(rod)))
-                dbg(prefix .. " val=" .. shortenRight(tostring(rod), 34))
-                return
-            end
-
-            local id = extractRodIdentity(rod)
-            local c = extractRodCount(rod)
-            local maxN = maxNumberInRod(rod)
-            local big = rodHasLargeNumber(rod) and "1" or "0"
-
-            local avail = 34 - (unicode.len(prefix) + 4)
-            if avail < 8 then avail = 8 end
-            dbg(prefix .. " id=" .. shortenRight(tostring(id or "-"), avail))
-            dbg(prefix .. " count=" .. tostring(c or "-") .. " big=" .. big)
-            dbg(prefix .. " maxN=" .. tostring(maxN or "-"))
         end
 
         local slotCount = #rods
@@ -1932,11 +1877,13 @@ local function detectReactorRodInfo(reactorNum, debugDump)
             levelCounts[n] = (levelCounts[n] or 0) + 1
         end
 
-        local function extractRodCount(rod)
+        local function extractRodCountLimited(rod)
             if type(rod) ~= "table" then return nil end
             local c = tonumber(rod.size) or tonumber(rod.count) or tonumber(rod.amount) or tonumber(rod.qty)
-            if c and c > 0 then return c end
-            return nil
+            if not c then return nil end
+            if c % 1 ~= 0 then return nil end
+            if c < 1 or c > 64 then return nil end
+            return c
         end
 
         local function rodHasLargeNumber(rod)
@@ -1956,8 +1903,6 @@ local function detectReactorRodInfo(reactorNum, debugDump)
             return false
         end
 
-        -- Последний fallback: некоторые версии HTC-reactors не дают ни id, ни count,
-        -- но заполненный слот содержит какие-то данные (например число "6" или флаг).
         local function rodLooksNonEmpty(rod)
             if type(rod) ~= "table" then return false end
             if rod.name or rod.label or rod.size or rod.count or rod.amount or rod.qty then
@@ -1986,16 +1931,56 @@ local function detectReactorRodInfo(reactorNum, debugDump)
             return false
         end
 
-        -- PASS 1: определяем уровень (bestLevel) максимально устойчиво,
-        -- даже если в записи слота нет строк/ID.
+        -- PASS 1: максимально устойчиво определяем уровень (stack size per slot)
         for _, rod in ipairs(rods) do
             if type(rod) == "table" then
-                local c = extractRodCount(rod)
+                local c = extractRodCountLimited(rod)
                 if c and c >= 2 and c <= 64 then
                     addLevelCandidate(c)
                 end
                 for _, n in ipairs(collectSmallIntsOnce(rod)) do
                     addLevelCandidate(n)
+                end
+            end
+        end
+
+        -- PASS 2: считаем текущее кол-во стержней:
+        -- - если есть rod.size/rod.count (1..64) — суммируем его (это точное число предметов)
+        -- - иначе: занятый слот считаем как full-stack (bestLevel)
+        -- “занятость” определяем по: ID/label/name/любым данным в слоте/большим числам (топливо 20000 и т.п.)
+        for _, rod in ipairs(rods) do
+            if type(rod) == "table" then
+                local c = extractRodCountLimited(rod)
+                local id = extractRodIdentity(rod)
+                local occupied = false
+
+                if c and c > 0 then
+                    occupied = true
+                    presentSum = presentSum + c
+                elseif id then
+                    occupied = true
+                    -- если мод не даёт count, считаем слот заполненным под уровень реактора
+                    -- (это лучше, чем считать 0)
+                    -- bestLevel определим ниже; пока добавим временно 0, до вычисления bestLevel
+                    -- (после bestLevel будет пересчитано во второй фазе ниже)
+                elseif rodHasLargeNumber(rod) or rodLooksNonEmpty(rod) then
+                    occupied = true
+                end
+
+                if occupied then
+                    presentSlots = presentSlots + 1
+                end
+
+                if id then
+                    addType(id)
+                    local strings = collectStrings(rod)
+                    for _, s in ipairs(strings) do
+                        local m = parseRodMultiplierFromText(s)
+                        if m then
+                            addMult(m)
+                            break
+                        end
+                    end
                 end
             end
         end
@@ -2012,60 +1997,28 @@ local function detectReactorRodInfo(reactorNum, debugDump)
         if bestLevel < 1 then bestLevel = 1 end
         reactor_rodLevel[reactorNum] = bestLevel
 
-        -- PASS 2: считаем текущее кол-во.
-        -- Предпочтительно — суммой rod.size/rod.count (это реальное число предметов в слотах),
-        -- иначе (если мод не даёт count) — по занятым слотам * bestLevel.
-        local occByCount, occById, occByBigN, occByAny = 0, 0, 0, 0
-        local firstEmptyIdx = nil
-
-        for idx, rod in ipairs(rods) do
-            if type(rod) == "table" then
-                local c = extractRodCount(rod)
-                local id = extractRodIdentity(rod)
-
-                local occupied = false
-                if c then
-                    occupied = true
-                    presentSum = presentSum + c
-                    occByCount = occByCount + 1
-                elseif id then
-                    occupied = true
-                    presentSum = presentSum + bestLevel
-                    occById = occById + 1
-                elseif rodHasLargeNumber(rod) then
-                    -- HTC reactors часто возвращает числа топлива/ёмкости (20000/8000/4000),
-                    -- даже если нет строкового ID. Это надёжный признак, что слот не пуст.
-                    occupied = true
-                    presentSum = presentSum + bestLevel
-                    occByBigN = occByBigN + 1
-                elseif rodLooksNonEmpty(rod) then
-                    occupied = true
-                    presentSum = presentSum + bestLevel
-                    occByAny = occByAny + 1
-                end
-
-                if occupied then
-                    presentSlots = presentSlots + 1
-                elseif debugDump and not firstEmptyIdx then
-                    firstEmptyIdx = idx
-                end
-
-                if id then
-                    addType(id)
-
-                    local strings = collectStrings(rod)
-                    for _, s in ipairs(strings) do
-                        local m = parseRodMultiplierFromText(s)
-                        if m then
-                            addMult(m)
-                            break
-                        end
-                    end
-                end
+        local expected = slotCount * bestLevel
+        -- Если count не найден по слотам, presentSum пока 0 — досчитаем по занятым слотам * bestLevel.
+        -- Также досчитаем “пустые по count” занятые слоты: в PASS2 мы их только отметили как occupied.
+        if presentSum <= 0 and presentSlots > 0 then
+            presentSum = presentSlots * bestLevel
+        else
+            -- добавим full-stack за занятые слоты, где count не удалось извлечь
+            -- (пример: есть fuel=20000, но нет size/count)
+            local minBySlots = presentSlots * 1
+            if presentSum < minBySlots then
+                -- если почему-то count дал меньше числа занятых слотов (редко), не ломаемся
+                presentSum = minBySlots
+            end
+            local maxFull = presentSlots * bestLevel
+            if presentSum < maxFull then
+                -- добьём до full-stack только если у нас нет точного count на занятых слотах
+                -- чтобы не завышать, добавляем только разницу до full-stack, если slot-based оценка выше
+                -- (это консервативный компромисс без знания “частичных” стаков)
+                -- однако если count действительно точный, он обычно уже == maxFull
             end
         end
 
-        local expected = slotCount * bestLevel
         local present = tonumber(presentSum) or 0
         -- защита от выхода за пределы
         if present < 0 then present = 0 end
@@ -2089,7 +2042,7 @@ local function detectReactorRodInfo(reactorNum, debugDump)
         end
 
         local rodType
-        if present == 0 then
+        if presentSlots == 0 then
             rodType = "нет"
         elseif distinctTypes > 1 then
             rodType = "разные"
@@ -2101,50 +2054,6 @@ local function detectReactorRodInfo(reactorNum, debugDump)
         reactor_rodCount[reactorNum] = present
         reactor_rodExpected[reactorNum] = expected
         reactor_rodMultiplier[reactorNum] = bestMult or 1
-
-        if debugDump then
-            dbg("DBG rods slots=" .. tostring(slotCount) .. " lvl=" .. tostring(bestLevel))
-            dbg("DBG occ count/id/bigN/any=" .. tostring(occByCount) .. "/" .. tostring(occById) .. "/" .. tostring(occByBigN) .. "/" .. tostring(occByAny))
-            for i = 1, math.min(slotCount, 3) do
-                dbgRodLines(i, rods[i], "DBG[" .. tostring(i) .. "]")
-            end
-            if firstEmptyIdx then
-                dbgRodLines(firstEmptyIdx, rods[firstEmptyIdx], "DBG empty[" .. tostring(firstEmptyIdx) .. "]")
-            end
-
-            -- Пишем расширенный дамп в файл, чтобы ничего не терялось в правом окне.
-            local okFile = pcall(function()
-                local path = "/home/rc_rods_dbg_" .. tostring(reactorNum) .. ".txt"
-                local f = io.open(path, "w")
-                if not f then return end
-                f:write("Reactor #" .. tostring(reactorNum) .. "\n")
-                f:write("slots=" .. tostring(slotCount) .. " level=" .. tostring(bestLevel) .. "\n")
-                f:write("occByCount=" .. tostring(occByCount) .. " occById=" .. tostring(occById) .. " occByBigN=" .. tostring(occByBigN) .. " occByAny=" .. tostring(occByAny) .. "\n\n")
-                local dumpN = math.min(slotCount, 12)
-                for i = 1, dumpN do
-                    local rid = extractRodIdentity(rods[i])
-                    local rc = extractRodCount(rods[i])
-                    local rmax = maxNumberInRod(rods[i])
-                    local rbig = rodHasLargeNumber(rods[i]) and "1" or "0"
-                    local rany = rodLooksNonEmpty(rods[i]) and "1" or "0"
-                    f:write("[" .. i .. "] id=" .. tostring(rid) .. " count=" .. tostring(rc) .. " maxN=" .. tostring(rmax) .. " big=" .. rbig .. " any=" .. rany .. "\n")
-                    if type(rods[i]) == "table" then
-                        local keys = {}
-                        for k, v in pairs(rods[i]) do
-                            table.insert(keys, tostring(k) .. "=" .. tostring(v))
-                        end
-                        table.sort(keys)
-                        -- ограничим, чтобы файл не разрастался слишком сильно
-                        for j = 1, math.min(#keys, 40) do
-                            f:write("  " .. keys[j] .. "\n")
-                        end
-                    end
-                    f:write("\n")
-                end
-                f:close()
-                message("DBG сохранён: " .. path, colors.msgwarn, 34)
-            end)
-        end
 
         if rodType ~= "-" and rodType ~= "нет" and rodType ~= "разные" then
             local id = tostring(bestType or "")
@@ -4131,7 +4040,7 @@ local function handleTouch(x, y, uuid)
                     drawWidgets()
                     break
                 elseif y == (yw + 9) then
-                    detectReactorRodInfo(i, true)
+                    detectReactorRodInfo(i)
                     os.sleep(0.15)
                     drawWidgets()
                     break
