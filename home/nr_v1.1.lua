@@ -104,6 +104,7 @@ local reactor_rod_count = {}
 local reactor_rod_max = {}
 local reactor_rod_types = {}
 local reactor_level = {}
+local reactor_fuel_type = {}
 local adapters_proxy = {}
 local adapters_address = {}
 local reactor_adapter_index = {}
@@ -499,6 +500,7 @@ local function initReactors()
         reactor_rod_max[i] = 0
         reactor_rod_types[i] = "н/д"
         reactor_level[i] = 1
+        reactor_fuel_type[i] = nil
     end
 end
 
@@ -1542,6 +1544,103 @@ local function getReactorLevel(proxy)
     return 1
 end
 
+local function getFuelTypeFromProxy(proxy)
+    if not proxy then
+        return nil
+    end
+    local methods = {
+        "getFuelType",
+        "getFuelName",
+        "getFuelId",
+        "getFuel",
+        "getFuelInfo",
+        "getFuelData",
+        "getFuelRodType",
+        "getFuelRodName",
+    }
+    for _, method in ipairs(methods) do
+        local result = safeCall(proxy, method, nil)
+        if type(result) == "string" then
+            local id = extractRodId({result})
+            if id then
+                return id
+            end
+            local key = result:lower()
+            if key:find("uran") then
+                return "htc_reactors:quad_uranium_fuel_rod"
+            end
+            if key:find("mox") then
+                return "htc_reactors:quad_mox_fuel_rod"
+            end
+            if key:find("californium") then
+                return "htc_reactors:quad_californium_fuel_rod"
+            end
+            if key:find("ksir") or key:find("viz") then
+                return "htc_reactors:quad_ksirviz_fuel_rod"
+            end
+        elseif type(result) == "table" then
+            local id = extractRodId(result)
+            if id then
+                return id
+            end
+        end
+    end
+    return nil
+end
+
+local function getRodCountFromProxy(proxy)
+    if not proxy then
+        return nil
+    end
+    local methods = {
+        "getFuelRodCount",
+        "getFuelRodsCount",
+        "getNumberOfFuelRods",
+        "getFuelRodAmount",
+        "getFuelRods",
+        "getRodCount",
+        "getRodsCount",
+    }
+    for _, method in ipairs(methods) do
+        local result = safeCall(proxy, method, nil)
+        if type(result) == "number" and result > 0 then
+            return math.floor(result)
+        elseif type(result) == "table" then
+            local n = tonumber(result.count) or tonumber(result.amount) or tonumber(result[1])
+            if n and n > 0 then
+                return math.floor(n)
+            end
+        end
+    end
+    return nil
+end
+
+local function getRodMaxFromProxy(proxy)
+    if not proxy then
+        return nil
+    end
+    local methods = {
+        "getFuelRodMax",
+        "getMaxFuelRods",
+        "getFuelRodCapacity",
+        "getMaxFuelRodCount",
+        "getMaxRods",
+        "getRodsMax",
+    }
+    for _, method in ipairs(methods) do
+        local result = safeCall(proxy, method, nil)
+        if type(result) == "number" and result > 0 then
+            return math.floor(result)
+        elseif type(result) == "table" then
+            local n = tonumber(result.max) or tonumber(result.capacity) or tonumber(result[1])
+            if n and n > 0 then
+                return math.floor(n)
+            end
+        end
+    end
+    return nil
+end
+
 local function updateRodData(num)
     for i = num or 1, num or reactors do
         local proxy = reactors_proxy[i]
@@ -1550,6 +1649,7 @@ local function updateRodData(num)
         local totalCount = 0
         if proxy then
             reactor_level[i] = getReactorLevel(proxy) or 1
+            reactor_fuel_type[i] = getFuelTypeFromProxy(proxy)
             counts, totalCount, maxCount = countRodsFromStatus(proxy)
             if counts == nil or (next(counts) == nil and (totalCount or 0) == 0) then
                 counts, totalCount, maxCount = countRodsFromInventory(proxy)
@@ -1582,8 +1682,16 @@ local function updateRodData(num)
                 end
             end
         end
+        local rodCount = getRodCountFromProxy(proxy)
+        if rodCount and rodCount > 0 then
+            totalCount = rodCount
+        end
+        local rodMax = getRodMaxFromProxy(proxy)
+        if rodMax and rodMax > 0 then
+            maxCount = rodMax
+        end
         local lvl = reactor_level[i] or 1
-        if lvl > 1 and (totalCount or 0) > 0 then
+        if lvl > 1 and (totalCount or 0) > 0 and (rodCount == nil or rodCount <= 0) then
             if type(counts) == "table" then
                 for id, c in pairs(counts) do
                     counts[id] = (tonumber(c) or 0) * lvl
@@ -1595,7 +1703,11 @@ local function updateRodData(num)
         reactor_rod_counts[i] = counts or {}
         reactor_rod_summary[i] = formatRodCounts(counts)
         if (totalCount or 0) > 0 and (counts == nil or next(counts) == nil) then
-            reactor_rod_types[i] = "Неизв."
+            if reactor_fuel_type[i] and rod_types[reactor_fuel_type[i]] then
+                reactor_rod_types[i] = rod_types[reactor_fuel_type[i]]
+            else
+                reactor_rod_types[i] = "Неизв."
+            end
         else
             reactor_rod_types[i] = formatRodTypes(counts)
         end
@@ -3652,6 +3764,7 @@ local function mainLoop()
     reactor_rod_max = {}
     reactor_rod_types = {}
     reactor_level = {}
+    reactor_fuel_type = {}
     reactor_rod_counts = {}
     reactor_rod_summary = {}
     
