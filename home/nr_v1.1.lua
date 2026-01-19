@@ -1299,8 +1299,6 @@ local function drawTimeInfo()
     for i = 0, 35 - 1 do
         buffer.drawText(123 + i, fl_y1+1, colors.bg2, brailleChar(brail_console[2]))
     end
-    buffer.drawText(124, fl_y1, colors.textclr, "МЭ: Обн. ч/з..")
-    buffer.drawText(141, fl_y1, colors.textclr, "Время работы:")
     buffer.drawText(139, fl_y1, colors.bg2, brailleChar(brail_cherta[1]))
     buffer.drawText(139, fl_y1+1, colors.bg2, brailleChar(brail_cherta[2]))
     buffer.drawText(139, fl_y1+2, colors.bg2, brailleChar(brail_cherta[1]))
@@ -1622,9 +1620,16 @@ local function start(num)
         local proxy = reactors_proxy[i]
 
         updateReactorRodsState(i)
-        if reactor_missingRods[i] then
+        local cnt = tonumber(reactor_rodCount[i]) or 0
+        local exp = tonumber(reactor_rodExpected[i]) or 0
+        if cnt == 0 then
             if num then
-                message("Не все стержни установлены! Реактор #" .. i .. " не будет запущен.", colors.msgwarn, 34)
+                message("Реактор #" .. i .. " пустой! Запуск невозможен.", colors.msgwarn, 34)
+            end
+            reactor_work[i] = false
+        elseif cnt ~= exp then
+            if num then
+                message("Реактор #" .. i .. " не полностью заполнен стержнями (" .. cnt .. "/" .. exp .. ")! Запуск невозможен.", colors.msgwarn, 34)
             end
             reactor_work[i] = false
         else
@@ -1854,7 +1859,6 @@ local function detectReactorRodInfo(reactorNum)
 
         local slotCount = #rods
         local presentSlots = 0
-        local presentRods = 0
         local typeCounts = {}
         local multCounts = {}
         local levelCounts = {}
@@ -1880,17 +1884,31 @@ local function detectReactorRodInfo(reactorNum)
         for _, rod in ipairs(rods) do
             if type(rod) == "table" then
                 local id = extractRodIdentity(rod)
-                if id then
-                    presentSlots = presentSlots + 1
-                    local rodCount = tonumber(rod.size) or tonumber(rod.count) or 1
-                    presentRods = presentRods + rodCount
-                    addType(id)
-
-                    -- уровень берём по моде среди маленьких чисел в записи rod[...] (включая строковые "6"), исключая rod.size
-                    for _, n in ipairs(collectSmallIntsOnce(rod)) do
-                        if n ~= rodCount then  -- исключаем rod.size
-                            addLevelCandidate(n)
+                -- Проверяем не только по ID, но и по наличию каких-либо данных в слоте
+                local hasRod = id ~= nil
+                if not hasRod then
+                    -- Дополнительная проверка: если есть name, damage или size > 0, считаем что стержень есть
+                    local name = rod.name or rod.label
+                    local damage = rod.damage or rod.dmg or rod.metadata
+                    local size = rod.size or rod.count or rod.amount or rod.qty
+                    if (name and name ~= "") or (size and tonumber(size) and tonumber(size) > 0) then
+                        hasRod = true
+                        -- Для отладки: если extractRodIdentity не нашел, но данные есть
+                        if debugLog then
+                            logError("Rod detected by fallback check: name=" .. tostring(name) .. ", size=" .. tostring(size))
                         end
+                    end
+                end
+
+                if hasRod then
+                    presentSlots = presentSlots + 1
+                    if id then
+                        addType(id)
+                    end
+
+                    -- уровень берём по моде среди маленьких чисел в записи rod[...] (включая строковые "6")
+                    for _, n in ipairs(collectSmallIntsOnce(rod)) do
+                        addLevelCandidate(n)
                     end
 
                     local strings = collectStrings(rod)
@@ -1917,8 +1935,8 @@ local function detectReactorRodInfo(reactorNum)
         if bestLevel < 1 then bestLevel = 1 end
         reactor_rodLevel[reactorNum] = bestLevel
 
-        local present = presentRods
-        local expected = (presentRods == 0) and 0 or (slotCount * bestLevel)
+        local present = presentSlots * bestLevel
+        local expected = slotCount * bestLevel
 
         local bestType, bestTypeCount = nil, 0
         local distinctTypes = 0
@@ -1950,6 +1968,13 @@ local function detectReactorRodInfo(reactorNum)
         reactor_rodExpected[reactorNum] = expected
         reactor_rodMultiplier[reactorNum] = bestMult or 1
 
+        -- Отладочная информация для проверки подсчета стержней
+        if debugLog and (present ~= expected or present == 0) then
+            logError("Reactor #" .. reactorNum .. " rod count: present=" .. present .. ", expected=" .. expected ..
+                    ", slots=" .. slotCount .. ", level=" .. bestLevel ..
+                    ", presentSlots=" .. presentSlots)
+        end
+
         if rodType ~= "-" and rodType ~= "нет" and rodType ~= "разные" then
             local id = tostring(bestType or "")
             if id ~= "" and id:find(":") then
@@ -1979,10 +2004,11 @@ updateReactorRodsState = function(reactorNum)
 
     local exp = tonumber(reactor_rodExpected[reactorNum]) or 0
     local cnt = tonumber(reactor_rodCount[reactorNum]) or 0
+    -- Реактор считается готовым только если полностью заполнен (cnt == exp и cnt > 0)
     if exp <= 0 then
-        reactor_missingRods[reactorNum] = false
+        reactor_missingRods[reactorNum] = true  -- если expected = 0, то что-то не так
     else
-        reactor_missingRods[reactorNum] = (cnt < exp)
+        reactor_missingRods[reactorNum] = (cnt ~= exp or cnt == 0)
     end
 end
 
