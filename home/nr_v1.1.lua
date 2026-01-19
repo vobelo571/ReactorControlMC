@@ -41,7 +41,7 @@ if not fs.exists(configPath) then
         file:write("-- Прежде чем что-то изменять, пожалуйста внимательно читайте описание!\n\n")
         file:write("porog = 50000 -- Минимальное значение порога жидкости в mB\n\n")
         file:write("-- Впишите никнеймы игроков которым будет разрешеннен доступ к ПК, обязательно ради вашей безопасности!\n")
-        file:write("users = {} -- Пример: {\"P1KaChU337\", \"Nickname1\"} -- Именно что с кавычками и запятыми!\n")
+        file:write("users = {} -- Пример: {\"Flixmo\", \"Nickname1\"} -- Именно что с кавычками и запятыми!\n")
         file:write("usersold = {} -- Не трогайте, может заблокировать ПК!\n\n")
         file:write("-- Тема интерфейса в системе по стандарту\n")
         file:write("theme = false -- (false темная, true светлая)\n\n")
@@ -1017,12 +1017,6 @@ local function drawRightMenu()
         local alpha = 1 - t
         buffer.drawText(124, 4 + i, baseColor, entry.text or "", alpha)
     end
-
-    if supportersText then
-        buffer.drawText(124, 5, colors.textclr, "Спасибо за поддержку:")
-        drawMarquee(124, 6, supportersText ..  "                            ", 0xF15F2C)
-    end
-    
     buffer.drawChanges()
 end
 
@@ -2151,24 +2145,6 @@ local function drawSettingsMenu()
         end
         return false
     end
-
-    -- function msgModal(x, y, w, h, color, text, textclr)
-    --     local winX, winY, winW, winH = x, y, w, h
-    --     buffer.drawRectangle(winX, winY, winW, winH-2, color, 0x3a3a3a, brailleChar(button1[7]))
-
-    --     buffer.drawRectangle(winX-1, winY+1, winW+2, winH-2, color, 0, " ")
-
-    --     buffer.drawRectangle(winX, winY+(winH-1), winW, 1, color, 0x3a3a3a, brailleChar(button1[1]))
-
-    --     local winCornerPos = {
-    --         {winX-1, winY, 4}, {winX+winW, winY, 2},
-    --         {winX+winW, winY+winH-1, 6}, {winX-1, winY+winH-1, 5}
-    --     }
-    --     for _, c in ipairs(winCornerPos) do
-    --         buffer.drawText(c[1], c[2], color, brailleChar(button1[c[3]]))
-    --     end
-    --     buffer.drawText(winX, winY+1, textclr or 0x000000, text)
-    -- end
     -- ---------
 
     buffer.drawText(modalX + 1, modalY + modalH - 1, 0x999999, "P.S. Нажмите в любом месте вне окна, чтобы выйти без сохранения")
@@ -2483,33 +2459,7 @@ local function drawInfoMenu()
     end
 
     local infotext = {
-        "Автор программы: P1KaChU337",
-        "",
-        "Контакты: vk.com/p1kachu337, Discord: p1kachu337, Telegram: @sh1zurz",
-        "",
-        "GitHub проекта: github.com/P1KaChU337/Reactor-Control-for-OpenComputers",
-        "",
-        "Поддержать проект можно, предварительно связавшись со мной для согласования способа поддержки (на карту, boosty, или иной подарок).",
-        "",
-        "Лицензия: MIT License",
-        "",
-        "Описание программы:",
-        "Reactor Control — программа мониторинга, контроля и управления критически важными системами реакторного комплекса для игроков сервера McSkill HiTech 1.12.2, разработанная на базе мода OpenComputers. Программа предназначена для централизованного управления реакторами и связанными с ними инфраструктурными системами, а также для автоматического предотвращения аварийных ситуаций без необходимости постоянного ручного контроля.",
-        "",
-        "Программа поддерживает работу с жидкостными и воздушными HT-реакторами, интеграцию с Applied Energistics 2 для мониторинга и анализа жидкостей, а также интеграцию с Flux Networks для контроля энергетической сети. Подключение осуществляется через адаптеры OpenComputers к соответствующим контроллерам. Основной упор сделан на стабильность, безопасность и корректную работу реакторных комплексов любого масштаба.",
-        "",
-        "Реализована автоматическая система безопасности для жидкостных реакторов. При снижении уровня хладагента в МЭ-сети ниже заданного порога либо при полной недоступности МЭ-сети реакторы автоматически отключаются и переводятся в аварийный режим, в котором ручной запуск блокируется. После восстановления нормальных условий реакторы автоматически возвращаются в штатный режим и запускаются. Воздушные реакторы при проблемах с жидкостью не затрагиваются. Контроль состояния сетей и жидкостей выполняется на постоянной основе.",
-        "",
-        "Графический интерфейс программы отображает детальную информацию по каждому реактору, включая температуру, текущую генерацию энергии, тип реактора, статус включения, уровень хладагента в буфере, индивидуальный отсчёт времени до распада топливных стержней и данные о потреблении жидкости. В общем статусе комплекса выводится количество установленных реакторов и текущее состояние системы.",
-        "",
-        "Программа поддерживает управление и получение информации через игровой чат с использованием Chat Box. Это позволяет запускать и останавливать реакторы, получать статус комплекса, изменять параметры безопасности и управлять списком пользователей без прямого взаимодействия с интерфейсом компьютера. Реализована система пользователей и прав доступа, а также гибкая конфигурация с пользовательскими настройками.",
-        "",
-        "Особое внимание уделено надёжности и стабильности работы. Программа устойчиво обрабатывает ошибки, корректно работает при потере связи с МЭ- и Flux-сетями, использует безопасные вызовы компонентов и оптимизированную отрисовку интерфейса. Архитектура кода переработана с упором на предотвращение зависаний и циклических перезагрузок, что делает программу пригодной для длительной непрерывной работы.",
-        "",
-        "Программа не проверяет корректность сборки самих реакторов. В случае неверной схемы реактора вся ответственность за возможные последствия полностью лежит на пользователе.",
-        "",
-        "Программа распространяется бесплатно и предоставляется «как есть». Возможны ошибки и баги, но они оперативно исправляются, в случае если вы нашли баг настоятельная просьба сообщить об этом автору.", 
-        "Так-же автор не несёт ответственности за взрывы реакторов или иной ущерб, возникший в результате использования программы."
+        "Автор программы: Flixmo"
     }
 
     local changelogText = {}
@@ -2529,19 +2479,7 @@ local function drawInfoMenu()
     end
 
     local licenseText = {
-        "MIT License", 
-        "",
-        "Copyright (c) 2025 P1KaChU337",
-        "",
-        "English Version",
-        "Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the \"Software\"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions: The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.",
-        "",
-        "THE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.",
-        "",
-        "Русская версия",
-        "Настоящим предоставляется разрешение любому лицу, получающему копию данного программного обеспечения и связанных с ним файлов документации («Программное обеспечение»), безвозмездно использовать Программное обеспечение без ограничений, включая, помимо прочего, права использовать, копировать, изменять, объединять, публиковать, распространять, сублицензировать и/или продавать копии Программного обеспечения, а также разрешать лицам, которым предоставляется Программное обеспечение, делать это при соблюдении следующих условий: Вышеуказанное уведомление об авторских правах и настоящее уведомление о разрешении должны быть включены во все копии или существенные части Программного обеспечения.",
-        "",
-        "ПРОГРАММНОЕ ОБЕСПЕЧЕНИЕ ПРЕДОСТАВЛЯЕТСЯ «КАК ЕСТЬ», БЕЗ КАКИХ-ЛИБО ГАРАНТИЙ, ЯВНЫХ ИЛИ ПОДРАЗУМЕВАЕМЫХ, ВКЛЮЧАЯ, НО НЕ ОГРАНИЧИВАЯСЬ, ГАРАНТИЯМИ ТОВАРНОЙ ПРИГОДНОСТИ,  ПРИГОДНОСТИ ДЛЯ КОНКРЕТНОЙ ЦЕЛИ И ОТСУТСТВИЯ НАРУШЕНИЯ ПРАВ. НИ ПРИ КАКИХ ОБСТОЯТЕЛЬСТВАХ  АВТОРЫ ИЛИ ПРАВООБЛАДАТЕЛИ НЕ НЕСУТ ОТВЕТСТВЕННОСТИ ЗА ЛЮБЫЕ ПРЕТЕНЗИИ, УБЫТКИ ИЛИ  ИНЫЕ ОБЯЗАТЕЛЬСТВА, БУДЬ ТО ПО ДОГОВОРНЫМ, ДЕЛИКТНЫМ ИЛИ ИНЫМ ПРИЧИНАМ,  ВОЗНИКАЮЩИЕ ИЗ ПРОГРАММНОГО ОБЕСПЕЧЕНИЯ ИЛИ В СВЯЗИ С НИМИ, НИ С ИСПОЛЬЗОВАНИЕМ  ПРОГРАММНОГО ОБЕСПЕЧЕНИЯ ИЛИ ИНЫМИ ОПЕРАЦИЯМИ С ПРОГРАММНЫМ ОБЕСПЕЧЕНИЕМ."
+        "Как есть =)"
     }
 
     buffer.drawText(modalX + 19, modalY + 1, 0x000000, "Меню информации приложения ReactorControl v" .. version .. "." .. build)
@@ -2640,154 +2578,6 @@ local function drawInfoMenu()
     end
 end
 
--- -----------------------------------------------------
-local function checkVer()
-    if updateCheck == true then
-        local update = false
-        local newVer = progVer
-
-        local ok = os.execute("wget -fq https://github.com/P1KaChU337/Reactor-Control-for-OpenComputers/raw/refs/heads/main/versions.txt versions.txt > /dev/null 2>&1")
-        if ok then
-            local f = io.open("versions.txt", "r")
-            if f then
-                local remoteVer = f:read("*l")
-                f:close()
-
-                if remoteVer and remoteVer ~= "" then
-                    local function verToTable(v)
-                        local t = {}
-                        for num in v:gmatch("%d+") do
-                            table.insert(t, tonumber(num))
-                        end
-                        return t
-                    end
-
-                    local function isNewer(v1, v2) -- v1 > v2 ?
-                        local a, b = verToTable(v1), verToTable(v2)
-                        for i = 1, math.max(#a, #b) do
-                            local n1, n2 = a[i] or 0, b[i] or 0
-                            if n1 > n2 then return true end
-                            if n1 < n2 then return false end
-                        end
-                        return false
-                    end
-
-                    if isNewer(remoteVer, progVer) then
-                        update = true
-                        newVer = remoteVer
-                    end
-                end
-            end
-        end
-
-        os.execute("rm versions.txt > /dev/null 2>&1")
-        os.execute("rm updater > /dev/null 2>&1")
-
-        if update == true then
-            message("Вышла новая версия программы...", nil, 34)
-            local verfile = io.open("oldVersion.txt", "w")
-            if verfile then
-                verfile:write(progVer)
-                verfile:close()
-            end
-            
-            if work == true and any_reactor_on == true then
-                stop()
-            end
-            local old = buffer.copy(1, 1, 160, 50)
-            buffer.drawRectangle(1, 1, 160, 50, 0x000000, 0, " ", 0.4)
-
-            buffer.drawRectangle(40, 22, 80, 6, 0xcccccc, 0, " ")
-            buffer.drawRectangle(39, 23, 82, 4, 0xcccccc, 0, " ")
-            local cornerPos = {
-                {39, 22, 1}, {120, 22, 2},
-                {120, 27, 3}, {39, 27, 4}
-            }
-            for _, c in ipairs(cornerPos) do
-                buffer.drawText(c[1], c[2], 0xcccccc, brailleChar(brail_status[c[3]]))
-            end
-            buffer.drawText(45, 23, 0x000000, "Доступно обновление Reactor Control by P1KaChU337 (v" .. progVer ..", --> v" .. newVer .. ").")
-            buffer.drawText(43, 24, 0x000000, "Нажмите \"ОК\" для продолжения без обновления или \"Установить\" для обновления.")
-            animatedButton(1, 70, 25, "Ок", nil, nil, 6, nil, nil, 0x8100cc, 0xffffff)
-            animatedButton(1, 80, 25, "Установить", nil, nil, 10, nil, nil, 0x8100cc, 0xffffff)    
-
-            buffer.drawChanges()
-            while true do
-                local eventData = {event.pull(0.05)}
-                local eventType = eventData[1]
-                if eventType == "touch" then
-                    local _, _, x, y = table.unpack(eventData)
-
-                    if y >= 25 and y <= 27 and x >= 69 and x <= 76 then
-                        buffer.drawRectangle(69, 25, 7, 3, 0xcccccc, 0, " ")
-                        animatedButton(1, 70, 25, "Ок", nil, nil, 6, nil, nil, 0xa91df9, 0xffffff)
-                        animatedButton(2, 70, 25, "Ок", nil, nil, 6, nil, nil, 0xa91df9, 0xffffff)
-                        buffer.drawChanges()
-                        os.sleep(0.2)
-                        animatedButton(1, 70, 25, "Ок", nil, nil, 6, nil, nil, 0x8100cc, 0xffffff)
-                        buffer.drawChanges()
-
-                        buffer.paste(1, 1, old)
-                        buffer.drawChanges()
-                        message("Установка обновлений отменена!", nil, 34)
-                        break
-                    end
-
-                    if y >= 25 and y <= 27 and x >= 79 and x <= 90 then
-                        buffer.drawRectangle(79, 25, 11, 3, 0xcccccc, 0, " ")
-                        animatedButton(1, 80, 25, "Установить", nil, nil, 10, nil, nil, 0xa91df9, 0xffffff)
-                        animatedButton(2, 80, 25, "Установить", nil, nil, 10, nil, nil, 0xa91df9, 0xffffff)
-                        buffer.drawChanges()
-                        os.sleep(0.2)
-                        animatedButton(1, 80, 25, "Установить", nil, nil, 10, nil, nil, 0x8100cc, 0xffffff)
-                        buffer.drawChanges()
-                        os.sleep(0.5)
-                        buffer.drawRectangle(69, 25, 25, 3, 0xcccccc, 0, " ")
-                        buffer.drawText(70, 26, 0x767676, "Установка обновлений...")
-                        buffer.drawChanges()
-
-                        local ok = os.execute("wget -fq https://github.com/P1KaChU337/Reactor-Control-for-OpenComputers/raw/refs/heads/main/installer/updater.lua updater > /dev/null 2>&1")
-                        if not ok then
-                            buffer.paste(1, 1, old)
-                            message("Обновление прервано из-за ошибки!", colors.msgwarn, 34)
-                            os.execute("rm updater > /dev/null 2>&1")
-                            buffer.drawChanges()
-                            return
-                        end
-
-                        local f = io.open("updater", "r")
-                        if not f then
-                            buffer.paste(1, 1, old)
-                            message("Обновление прервано из-за ошибки!", colors.msgwarn, 34)
-                            os.execute("rm updater > /dev/null 2>&1")
-                            buffer.drawChanges()
-                            return
-                        end
-                        local content = f:read("*a")
-                        f:close()
-
-                        if not content or content == "" then
-                            buffer.paste(1, 1, old)
-                            message("Обновление прервано из-за ошибки!", colors.msgwarn, 34)
-                            os.execute("rm updater > /dev/null 2>&1")
-                            buffer.drawChanges()
-                            return
-                        end
-
-                        buffer.clear(0x000000)
-                        buffer.drawChanges()
-                        shell.execute("clear")
-                        rawset(_G, "__NR_ON_INTERRUPT__", nil)
-                        exit = true
-                        os.execute("updater")
-                        os.exit()
-                    end
-                end
-            end
-        end
-    end
-end
-
 -- ----------------------------------------------------------------------------------------------------
 local function loadChangelog(url, tmpFile)
     tmpFile = tmpFile or "/tmp/changelog.lua"
@@ -2819,223 +2609,6 @@ local function handleChatCommand(nick, msg, args)
             chatBox.say("§cУ вас нет прав для управления реакторами!")
         end
         return
-    end
-    
-    -- Обрабатываем команды
-    if msg == "@help" then
-        if isChatBox then
-            chatBox.say("§e=== Команды Reactor Control ===")
-            chatBox.say("§a@help - список команд")
-            chatBox.say("§a@info - информация о системе")
-            chatBox.say("§a@useradd - добавить пользователя (пример: @useradd Ник)") -- Сделай
-            chatBox.say("§a@userdel - удалить пользователя (пример: @userdel Ник)")
-            chatBox.say("§a@status - статус системы")
-            chatBox.say("§a@setporog - установка порога жидкости (пример: @setporog 500)")
-            chatBox.say("§a@start - запуск всех реакторов (или @start 1 для запуска только 1-го)")
-            chatBox.say("§a@stop - остановка всех реакторов (или @stop 1 для остановки только 1-го)")
-            chatBox.say("§a@exit - выход из программы")
-            chatBox.say("§a@restart - перезагрузка компьютера")
-            chatBox.say("§a@changelog - показать изменения в обновлениях(пример: @changelog 1.1.1)") -- Скачивается массив из гитхаба в массиве ченджлог выглядит так {"1.0.0 - описание, переносы строк и тп, все учитывать и выводить в чат","1.0.1 - описание","1.1.0 - описание"}
-        end
-        
-    elseif msg:match("^@status") then
-        if isChatBox then
-            chatBox.say("§a=== Статус системы ===")
-            chatBox.say("§aРеакторов: " .. reactors)
-
-            local running = {} -- список номеров запущенных реакторов
-            for i = 1, reactors do
-                if reactor_work[i] == true then
-                    table.insert(running, tostring(i))
-                end
-            end
-
-            if #running == reactors then
-                chatBox.say("§aЗапущены: Все")
-            elseif #running == 0 then
-                chatBox.say("§aЗапущены: Нет активных")
-            else
-                chatBox.say("§aЗапущены: " .. table.concat(running, ", "))
-            end
-
-            chatBox.say("§aЖидкости в МЭ: " .. fluidInMe .. " Mb")
-            chatBox.say("§aПорог: " .. porog .. " Mb")
-            chatBox.say("§aГенерация реакторов: " .. rf .. " RF/t")
-            chatBox.say("§aОбщее потребление жидкости реакторами: " .. consumeSecond .. " mB/s")
-            -- chatBox.say("§aСостояние реакторов:")
-            -- for i = 1, reactors do
-            --     if reactor_work[i] == true then
-            --         chatBox.say("§aРеактор " .. i .. ": §2Запущен")
-            --         chatBox.say("§aТемпература: §e" .. reactor_temp[i] .. " °C")
-            --         chatBox.say("§aВыработка: §e" .. reactor_rf[i] .. " RF/t")
-            --         chatBox.say("§aРаспад топлива через: §e" .. secondsToHMS(reactor_depletionTime[i] or 0))
-            --         chatBox.say("§aТип реактора: §e" .. reactor_type[i])
-            --         if reactor_type[i] == "Fluid" then
-            --             chatBox.say("§aПотребление жидкости: §e" .. reactor_consume[i] .. " mB/s")
-            --         end
-            --     else
-            --         chatBox.say("§aРеактор " .. i .. ": §cОстановлен")
-            --     end
-            -- end
-        end
-
-    elseif msg:match("^@start") then
-        local num = tonumber(args:match("^(%d+)"))
-        if isChatBox then
-            if num then
-                if num > 0 and num <= reactors then
-                    chatBox.say("§2Запускаю реактор " .. num .. "...")
-                    start(num)
-                else
-                    chatBox.say("§cНеверный номер реактора!")
-                end
-            else
-                chatBox.say("§2Запускаю все реакторы...")
-                starting = true
-                start()
-            end
-        end
-
-    elseif msg:match("^@stop") then
-        local num = tonumber(args:match("^(%d+)"))
-        if isChatBox then
-            if num then
-                if num > 0 and num <= reactors then
-                    chatBox.say("§cОстанавливаю реактор " .. num .. "...")
-                    stop(num)
-                else
-                    chatBox.say("§cНеверный номер реактора!")
-                end
-            else
-                chatBox.say("§cОстанавливаю все реакторы...")
-                starting = false
-                stop()
-            end
-        end
-
-    elseif msg:match("^@setporog") then
-        local newPorog = tonumber(args:match("^(%d+)"))
-        if newPorog then
-            if newPorog <= 0 then
-                chatBox.say("§cПорог жидкости не может быть отрицательным или нулевым!")
-            else
-                porog = newPorog
-                if isChatBox then
-                    chatBox.say("§2Порог жидкости установлен на " .. porog .. " Mb")
-                end
-            end
-        else
-            if isChatBox then
-                chatBox.say("§aЧтобы изменить порог жидкости, используйте: @setporog <значение>")
-                chatBox.say("§aПример: @setporog 500")
-            end
-        end
-        
-    elseif msg == "@info" then
-        if isChatBox then
-            chatBox.say("§bReactor Control v" .. version .. " Build " .. build)
-            chatBox.say("§aАвтор: §eP1KaChU337")
-            chatBox.say("§aGitHub: §1https://github.com/P1KaChU337/Reactor-Control-for-OpenComputers")
-            chatBox.say("§aПоддержать автора на §6Boosty: §1https://boosty.to/p1kachu337")
-            chatBox.say("§aИгроки с доступом: §5" .. table.concat(users, ", "))
-            chatBox.say("§aСпасибо за использование программы!")
-        end
-    elseif msg == "@exit" then
-        if isChatBox then
-            chatBox.say("§cЗавершаю работу программы...")
-            if work == true then
-                work = false
-                message("Отключаю реакторы!", colors.msginfo)
-                stop()
-                drawWidgets()
-                drawRFinfo()
-                os.sleep(0.3)
-            end
-            message("Завершаю работу программы...", colors.msgerror)
-            buffer.drawChanges()
-            os.sleep(0.2)
-            buffer.drawChanges()
-            os.sleep(0.5)
-            buffer.clear(0x000000)
-            buffer.drawChanges()
-            shell.execute("clear")
-            rawset(_G, "__NR_ON_INTERRUPT__", nil)
-            exit = true
-            os.exit()
-        end
-    elseif msg:match("^@useradd") then
-        local newUser = args:match("^(%S+)")
-        if newUser then
-            -- Проверка, нет ли уже такого пользователя
-            for _, u in ipairs(users) do
-                if u == newUser then
-                    chatBox.say("§cПользователь §5" .. newUser .. " §cуже есть в списке!")
-                    return
-                end
-            end
-
-            table.insert(users, newUser)
-            chatBox.say("§2Пользователь §5" .. newUser .. " §2добавлен!")
-            userUpdate()
-        else
-            chatBox.say("§aИспользование: @useradd <ник>")
-        end
-    elseif msg:match("^@userdel") then
-        local delUser = args:match("^(%S+)")
-        if delUser then
-            local found = false
-            for i, u in ipairs(users) do
-                if u == delUser then
-                    table.remove(users, i)
-                    chatBox.say("§2Пользователь §5" .. delUser .. " §2удалён!")
-                    found = true
-                    userUpdate()
-                    break
-                end
-            end
-            if not found then
-                chatBox.say("§cПользователь §5" .. delUser .. " §cне найден!")
-            end
-        else
-            chatBox.say("§aИспользование: @userdel <ник>")
-        end
-
-    elseif msg:match("^@changelog") then
-        local versionReq = args:match("^(%S+)")
-        if not changelog then
-            chatBox.say("§cОшибка загрузки changelog.lua!")
-            return
-        end
-
-        if versionReq then
-            local found = false
-            for _, entry in ipairs(changelog) do
-                if entry.version == versionReq then
-                    chatBox.say("§eИзменения в версии " .. entry.version .. ":")
-                    for _, line in ipairs(entry.changes) do
-                        chatBox.say("§a- " .. line)
-                    end
-                    found = true
-                    break
-                end
-            end
-            if not found then
-                chatBox.say("§cВерсия " .. versionReq .. " не найдена в ченджлоге!")
-            end
-        else
-            chatBox.say("§eДоступные версии:")
-            for _, entry in ipairs(changelog) do
-                chatBox.say("§a" .. entry.version)
-            end
-            chatBox.say("§aИспользуйте: @changelog <версия>")
-        end
-
-    elseif msg == "@restart" then
-        if isChatBox then
-            chatBox.say("§cПерезагрузка системы...")
-        end
-        silentstop()
-        computer.shutdown(true)
     end
 end
 
@@ -3408,7 +2981,7 @@ local function mainLoop()
     drawStatic()
     drawDynamic()
     message("------Reactor Control v" .. version .. "-------", 0x72f8ff)
-    message("Автор приложения: P1KaChU337", 0x72f8ff)
+    message("Автор приложения: Flixmo", 0x72f8ff)
     message("Версия приложения: " .. version .. ", Build " .. build, 0x72f8ff)
     message("Авто-обновление: " .. (updateCheck and "Включенно" or "Выключенно"), 0x72f8ff, 34)
     message("Реакторов найдено: " .. reactors, 0x72f8ff)
@@ -3419,8 +2992,6 @@ local function mainLoop()
     message(" ")
     userUpdate()
     message("Инициализация реакторов...", colors.textclr)
-    supportersText = loadSupportersFromURL("https://github.com/P1KaChU337/Reactor-Control-for-OpenComputers/raw/refs/heads/main/supporters.txt")
-    changelog = loadChangelog("https://github.com/P1KaChU337/Reactor-Control-for-OpenComputers/raw/refs/heads/main/changelog.lua")
     updateReactorData()
     if reactors ~= 0 then
         message("Реакторы инициализированы!", colors.msginfo, 34)
@@ -3618,10 +3189,6 @@ local function mainLoop()
             end
             if second >= 60 then
                 minute = minute + 1
-                if minute % 10 == 0 then
-                    supportersText = loadSupportersFromURL("https://github.com/P1KaChU337/Reactor-Control-for-OpenComputers/raw/refs/heads/main/supporters.txt")
-                    changelog = loadChangelog("https://github.com/P1KaChU337/Reactor-Control-for-OpenComputers/raw/refs/heads/main/changelog.lua")
-                end
                 if minute >= 60 then
                     checkVer()
                     hour = hour + 1
