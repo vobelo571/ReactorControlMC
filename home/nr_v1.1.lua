@@ -100,6 +100,7 @@ local reactor_rodType = {}
 local reactor_rodCount = {}
 local reactor_rodExpected = {}
 local reactor_rodMultiplier = {}
+local reactor_rodLevel = {}
 local last_me_address = nil
 local me_network = false
 local me_proxy = nil
@@ -803,8 +804,8 @@ local function drawWidgets()
             if exp > 0 then
                 rodLabel = rodLabel .. " " .. tostring(cnt) .. "/" .. tostring(exp)
             end
-            if unicode.len(rodLabel) > 13 then
-                rodLabel = unicode.sub(rodLabel, 1, 10) .. "..."
+            if unicode.len(rodLabel) > 16 then
+                rodLabel = unicode.sub(rodLabel, 1, 13) .. "..."
             end
             buffer.drawText(x + 4,  y + 7,  colors.textclr, "Стерж: " .. rodLabel)
 
@@ -1698,8 +1699,9 @@ local function detectReactorRodInfo(reactorNum)
     if not proxy then
         reactor_rodType[reactorNum] = "-"
         reactor_rodCount[reactorNum] = 0
-        reactor_rodExpected[reactorNum] = reactor_expectedRods[reactorNum] or 0
+        reactor_rodExpected[reactorNum] = 0
         reactor_rodMultiplier[reactorNum] = 1
+        reactor_rodLevel[reactorNum] = 1
         return
     end
 
@@ -1707,14 +1709,19 @@ local function detectReactorRodInfo(reactorNum)
     if type(rods) ~= "table" then
         reactor_rodType[reactorNum] = "-"
         reactor_rodCount[reactorNum] = 0
-        reactor_rodExpected[reactorNum] = reactor_expectedRods[reactorNum] or 0
+        reactor_rodExpected[reactorNum] = 0
         reactor_rodMultiplier[reactorNum] = 1
+        reactor_rodLevel[reactorNum] = 1
         return
     end
 
-    local present = 0
+    -- Важно: количество зависит от "уровня" (в каждом стержневом слоте лежит N предметов)
+    -- поэтому считаем суммой size/кол-ва в стеке.
+    local present = 0 -- предметов
+    local slotCount = #rods
     local typeCounts = {}
     local multCounts = {}
+    local levelCounts = {}
 
     local function addType(rawId)
         local t = normalizeRodType(rawId) or tostring(rawId or "")
@@ -1728,11 +1735,20 @@ local function detectReactorRodInfo(reactorNum)
         multCounts[m] = (multCounts[m] or 0) + 1
     end
 
+    local function addLevel(n)
+        n = tonumber(n)
+        if not n or n <= 0 then return end
+        levelCounts[n] = (levelCounts[n] or 0) + 1
+    end
+
     for _, rod in ipairs(rods) do
         if type(rod) == "table" then
             local id = extractRodIdentity(rod)
             if id then
-                present = present + 1
+                local stack = tonumber(rod.size) or tonumber(rod.count) or 1
+                if stack < 0 then stack = 0 end
+                present = present + stack
+                addLevel(stack)
                 addType(id)
 
                 local strings = collectStrings(rod)
@@ -1747,9 +1763,17 @@ local function detectReactorRodInfo(reactorNum)
         end
     end
 
-    local expected = #rods
-    local prevExpected = tonumber(reactor_expectedRods[reactorNum]) or 0
-    reactor_expectedRods[reactorNum] = math.max(prevExpected, expected, present)
+    -- Уровень реактора = наиболее частый размер стека у стержней (для 1 уровня часто =1)
+    local bestLevel, bestLevelCount = 1, 0
+    for lvl, c in pairs(levelCounts) do
+        if c > bestLevelCount then
+            bestLevel, bestLevelCount = lvl, c
+        end
+    end
+    if bestLevel < 1 then bestLevel = 1 end
+    reactor_rodLevel[reactorNum] = bestLevel
+
+    local expected = slotCount * bestLevel
 
     local bestType, bestTypeCount = nil, 0
     local distinctTypes = 0
@@ -1778,7 +1802,7 @@ local function detectReactorRodInfo(reactorNum)
 
     reactor_rodType[reactorNum] = rodType
     reactor_rodCount[reactorNum] = present
-    reactor_rodExpected[reactorNum] = reactor_expectedRods[reactorNum] or expected
+    reactor_rodExpected[reactorNum] = expected
     reactor_rodMultiplier[reactorNum] = bestMult or 1
 end
 
@@ -1789,27 +1813,16 @@ local function updateReactorRodsState(reactorNum)
         return
     end
 
-    local rods = safeCallwg(proxy, "getAllFuelRodsStatus", nil)
-    if type(rods) ~= "table" then
-        return
-    end
-
-    local present = 0
-    for _, rod in ipairs(rods) do
-        if isRodPresent(rod) then
-            present = present + 1
-        end
-    end
-
-    local expected = #rods
-    local prevExpected = tonumber(reactor_expectedRods[reactorNum]) or 0
-    reactor_expectedRods[reactorNum] = math.max(prevExpected, expected, present)
-
-    local complete = (reactor_expectedRods[reactorNum] <= 0) or (present >= reactor_expectedRods[reactorNum])
-    reactor_missingRods[reactorNum] = not complete
-
     -- также обновляем запомненную информацию о типе/кратности/кол-ве
     detectReactorRodInfo(reactorNum)
+
+    local exp = tonumber(reactor_rodExpected[reactorNum]) or 0
+    local cnt = tonumber(reactor_rodCount[reactorNum]) or 0
+    if exp <= 0 then
+        reactor_missingRods[reactorNum] = false
+    else
+        reactor_missingRods[reactorNum] = (cnt < exp)
+    end
 end
 
 local function getReactorRodsNeed(reactorNum)
@@ -1820,6 +1833,16 @@ local function getReactorRodsNeed(reactorNum)
     if type(rods) ~= "table" then return nil end
 
     local need = {}
+    local totals = {}
+    local distinct = 0
+    local lastKey = nil
+    local levelCounts = {}
+
+    local function addLevel(n)
+        n = tonumber(n)
+        if not n or n <= 0 then return end
+        levelCounts[n] = (levelCounts[n] or 0) + 1
+    end
 
     local function addNeed(filter, count)
         count = tonumber(count) or 0
@@ -1863,7 +1886,92 @@ local function getReactorRodsNeed(reactorNum)
                 if name then filter.name = name end
                 if damage ~= nil then filter.damage = damage end
                 if label and not name then filter.label = label end
-                addNeed(filter, count)
+                local key = tostring(filter.name or "") .. "|" .. tostring(filter.damage or "") .. "|" .. tostring(filter.label or "")
+                totals[key] = (totals[key] or 0) + (tonumber(count) or 0)
+                addLevel(count)
+                lastKey = key
+            end
+        end
+    end
+
+    for _ in pairs(totals) do distinct = distinct + 1 end
+
+    -- если тип стержня один: заказываем до полного заполнения (слоты * уровень)
+    if distinct == 1 and lastKey then
+        local bestLevel, bestLevelCount = 1, 0
+        for lvl, c in pairs(levelCounts) do
+            if c > bestLevelCount then
+                bestLevel, bestLevelCount = lvl, c
+            end
+        end
+        if bestLevel < 1 then bestLevel = 1 end
+
+        local desired = (#rods) * bestLevel
+        -- восстанавливаем filter из ключа
+        for _, rod in ipairs(rods) do
+            if type(rod) == "table" then
+                local name = rod.name
+                local damage = rod.damage or rod.dmg or rod.metadata
+                if damage ~= nil then damage = tonumber(damage) end
+                local label = rod.label
+                if not label then
+                    for _, v in ipairs(rod) do
+                        if type(v) == "string" and v ~= "" then
+                            label = v
+                            break
+                        end
+                    end
+                end
+                if not name then
+                    for _, v in ipairs(rod) do
+                        if type(v) == "string" and v:find(":") then
+                            name = v
+                            break
+                        end
+                    end
+                end
+                if name or label then
+                    local filter = {}
+                    if name then filter.name = name end
+                    if damage ~= nil then filter.damage = damage end
+                    if label and not name then filter.label = label end
+                    addNeed(filter, desired)
+                    break
+                end
+            end
+        end
+    else
+        -- если типов несколько: заказываем только то, что уже присутствует (не угадываем схему)
+        for _, rod in ipairs(rods) do
+            if type(rod) == "table" then
+                local count = tonumber(rod.size) or tonumber(rod.count) or 1
+                local name = rod.name
+                local damage = rod.damage or rod.dmg or rod.metadata
+                if damage ~= nil then damage = tonumber(damage) end
+                local label = rod.label
+                if not label then
+                    for _, v in ipairs(rod) do
+                        if type(v) == "string" and v ~= "" then
+                            label = v
+                            break
+                        end
+                    end
+                end
+                if not name then
+                    for _, v in ipairs(rod) do
+                        if type(v) == "string" and v:find(":") then
+                            name = v
+                            break
+                        end
+                    end
+                end
+                if name or label then
+                    local filter = {}
+                    if name then filter.name = name end
+                    if damage ~= nil then filter.damage = damage end
+                    if label and not name then filter.label = label end
+                    addNeed(filter, count)
+                end
             end
         end
     end
@@ -3453,6 +3561,7 @@ local function mainLoop()
     reactor_rodCount = {}
     reactor_rodExpected = {}
     reactor_rodMultiplier = {}
+    reactor_rodLevel = {}
     
     me_proxy = nil
     me_network = false
