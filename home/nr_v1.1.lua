@@ -100,6 +100,9 @@ local reactor_depletionTime = {}
 local reactor_ConsumptionPerSecond = {}
 local reactor_rod_counts = {}
 local reactor_rod_summary = {}
+local reactor_rod_count = {}
+local reactor_rod_max = {}
+local reactor_rod_types = {}
 local last_me_address = nil
 local me_network = false
 local me_proxy = nil
@@ -479,6 +482,9 @@ local function initReactors()
         reactor_depletionTime[i] = 0
         reactor_rod_counts[i] = {}
         reactor_rod_summary[i] = "н/д"
+        reactor_rod_count[i] = 0
+        reactor_rod_max[i] = 0
+        reactor_rod_types[i] = "н/д"
     end
 end
 
@@ -811,8 +817,11 @@ local function drawWidgets()
             buffer.drawText(x + 4,  y + 4,  colors.textclr, "Тип: " .. (reactor_type[i] or "-"))
             buffer.drawText(x + 4,  y + 5,  colors.textclr, "Запущен: " .. (reactor_work[i] and "Да" or "Нет"))
             buffer.drawText(x + 4,  y + 6,  colors.textclr, "Распад: " .. secondsToHMS(reactor_depletionTime[i] or 0))
-            buffer.drawText(x + 4,  y + 7,  colors.textclr, "Потреб: " .. (reactor_type[i] == "Fluid" and reactor_ConsumptionPerSecond[i] or "0") .. " mB/s")
-            buffer.drawText(x + 4,  y + 8,  colors.textclr, shortenText("Стержни: " .. (reactor_rod_summary[i] or "н/д"), 18))
+            buffer.drawText(x + 4,  y + 7,  colors.textclr, shortenText("Стержни: " .. (reactor_rod_types[i] or "н/д"), 18))
+            local countText = (reactor_rod_count[i] ~= nil and reactor_rod_max[i] ~= nil)
+                and (tostring(reactor_rod_count[i]) .. "/" .. tostring(reactor_rod_max[i]))
+                or "н/д"
+            buffer.drawText(x + 4,  y + 8,  colors.textclr, "Кол-во: " .. countText)
             animatedButton(1, x + 6, y + 9, (reactor_work[i] and "Отключить" or "Включить"), nil, nil, 10, nil, nil, (reactor_work[i] and 0xfd3232 or 0x2beb1a))
             if reactor_type[i] == "Fluid" then
                 drawVerticalProgressBar(x + 1, y + 1, 9, reactor_getcoolant[i], reactor_maxcoolant[i], 0x0044FF, 0x00C8FF, colors.bg2)
@@ -1315,18 +1324,81 @@ local function formatRodCounts(counts)
     return table.concat(parts, ", ")
 end
 
+local function formatRodTypes(counts)
+    if counts == nil then
+        return "н/д"
+    end
+    if next(counts) == nil then
+        return "нет"
+    end
+    local types = {}
+    local seen = {}
+    local hasUnknown = false
+    for _, id in ipairs(rod_order) do
+        if counts[id] and counts[id] > 0 then
+            local label = rod_types[id]
+            if label and not seen[label] then
+                table.insert(types, label)
+                seen[label] = true
+            end
+        end
+    end
+    for id, count in pairs(counts) do
+        if not rod_types[id] and (tonumber(count) or 0) > 0 then
+            hasUnknown = true
+        end
+    end
+    if hasUnknown then
+        table.insert(types, "Неизв.")
+    end
+    if #types == 0 then
+        return "нет"
+    end
+    return table.concat(types, ", ")
+end
+
 local function updateRodData(num)
     for i = num or 1, num or reactors do
         local proxy = reactors_proxy[i]
         local counts = nil
+        local maxCount = 0
+        local totalCount = 0
         if proxy then
             counts = countRodsFromStatus(proxy)
+            if type(counts) == "table" then
+                for _, c in pairs(counts) do
+                    totalCount = totalCount + (tonumber(c) or 0)
+                end
+                if totalCount > 0 then
+                    maxCount = totalCount
+                end
+            end
             if counts == nil or next(counts) == nil then
                 counts = countRodsFromInventory(proxy)
+                if type(counts) == "table" then
+                    totalCount = 0
+                    for _, c in pairs(counts) do
+                        totalCount = totalCount + (tonumber(c) or 0)
+                    end
+                    local size = getInventorySize(proxy)
+                    if type(size) == "number" and size > 0 then
+                        maxCount = size
+                    else
+                        maxCount = totalCount
+                    end
+                end
             end
         end
         reactor_rod_counts[i] = counts or {}
         reactor_rod_summary[i] = formatRodCounts(counts)
+        reactor_rod_types[i] = formatRodTypes(counts)
+        if counts == nil then
+            reactor_rod_count[i] = nil
+            reactor_rod_max[i] = nil
+        else
+            reactor_rod_count[i] = totalCount
+            reactor_rod_max[i] = maxCount
+        end
     end
 end
 
@@ -3364,6 +3436,11 @@ local function mainLoop()
     reactor_getcoolant = {}
     reactor_maxcoolant = {}
     reactor_depletionTime = {}
+    reactor_rod_counts = {}
+    reactor_rod_summary = {}
+    reactor_rod_count = {}
+    reactor_rod_max = {}
+    reactor_rod_types = {}
     reactor_rod_counts = {}
     reactor_rod_summary = {}
     
