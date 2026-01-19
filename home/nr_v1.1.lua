@@ -1694,6 +1694,27 @@ local function parseRodMultiplierFromText(s)
     return nil
 end
 
+local function getReactorLevel(proxy)
+    if not proxy then return 1 end
+    local candidates = {
+        "getLevel",
+        "getReactorLevel",
+        "getTier",
+        "getReactorTier",
+        "getUpgradeLevel",
+        "getCoreLevel",
+        "getReactorCoreLevel"
+    }
+    for _, m in ipairs(candidates) do
+        local v = safeCall(proxy, m, nil)
+        v = tonumber(v)
+        if v and v >= 1 and v <= 64 then
+            return math.floor(v)
+        end
+    end
+    return 1
+end
+
 local function collectSmallIntsOnce(rod)
     if type(rod) ~= "table" then return {} end
     local out, seen = {}, {}
@@ -1793,6 +1814,9 @@ local function detectReactorRodInfo(reactorNum)
                 bestLevel, bestLevelCount = lvl, c
             end
         end
+        if bestLevelCount == 0 then
+            bestLevel = getReactorLevel(proxy)
+        end
         if bestLevel < 1 then bestLevel = 1 end
         reactor_rodLevel[reactorNum] = bestLevel
 
@@ -1861,6 +1885,9 @@ end
 local function getReactorRodsNeed(reactorNum)
     local proxy = reactors_proxy[reactorNum]
     if not proxy then return nil end
+
+    -- обновляем уровень/тип/кол-во, чтобы правильно определить desired
+    detectReactorRodInfo(reactorNum)
 
     local rods = safeCallwg(proxy, "getAllFuelRodsStatus", nil)
     if type(rods) ~= "table" then return nil end
@@ -1936,6 +1963,9 @@ local function getReactorRodsNeed(reactorNum)
             if c > bestLevelCount then
                 bestLevel, bestLevelCount = lvl, c
             end
+        end
+        if bestLevelCount == 0 then
+            bestLevel = tonumber(reactor_rodLevel[reactorNum]) or getReactorLevel(proxy)
         end
         if bestLevel < 1 then bestLevel = 1 end
 
@@ -3553,9 +3583,9 @@ local function handleTouch(x, y, uuid)
                         stop(Rnum)
                         updateReactorData(Rnum)
                     else
-                        local ok = pcall(start, Rnum)
-                        if not ok then
-                            message("Ошибка запуска Реактора #" .. Rnum, colors.msgwarn, 34)
+                        local okStart, errStart = pcall(start, Rnum)
+                        if not okStart then
+                            message("Ошибка запуска Реактора #" .. Rnum .. ": " .. tostring(errStart), colors.msgwarn, 34)
                         end
                         starting = true
                         updateReactorData(Rnum)
