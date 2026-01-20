@@ -78,7 +78,6 @@ local hour = 0
 local testvalue = 0
 local rf = 0
 local fluidInMe = 0
-local ismechecked = false
 local flux_network = false
 local flux_checked = false
 
@@ -115,9 +114,7 @@ local maxThreshold = 10^12
 local reason = nil
 local depletionTime = 0
 local consumeSecond = 0
-local supportersText = nil
 local changelog = nil
-local MeSecond = 0
 
 local isChatBox = component.isAvailable("chat_box") or false
 local chatBox = isChatBox and component.chat_box or nil
@@ -956,10 +953,6 @@ local function drawNumberWithText(centerX, centerY, number, digitWidth, color, s
     end
 end
 
-local function darkenColor(baseColor, t)
-    return lerpColor(baseColor, 0x303030, 1 - t)
-end
-
 local function utf8len(str)
     local _, count = str:gsub("[^\128-\191]", "")
     return count
@@ -1015,64 +1008,6 @@ local function wrapText(msg, limit)
     end
 
     return result
-end
-
-local scrollPos = 1
-local maxWidth = 33
-
--- функция бегущей строки
-local function drawMarquee(x, y, text, color)
-    local textLength = unicode.len(text) -- считаем символы, а не байты
-
-    if textLength > maxWidth then
-        -- видимый кусок
-        local visible = unicode.sub(text, scrollPos, scrollPos + maxWidth - 1)
-
-        local visibleLen = unicode.len(visible)
-        if visibleLen < maxWidth then
-            local need = maxWidth - visibleLen
-            visible = visible .. unicode.sub(text, 1, need)
-        end
-
-        buffer.drawText(x, y, color, visible)
-
-        scrollPos = scrollPos + 1
-        if scrollPos > textLength then
-            scrollPos = 1
-        end
-    else
-        buffer.drawText(x, y, color, text)
-    end
-    buffer.drawChanges()
-end
-
-if not fs.exists("tmp") then
-    fs.makeDirectory("tmp")
-end
-local function loadSupportersFromURL(url, tmpFile)
-    tmpFile = tmpFile or "/tmp/supporters.txt"
-    -- удаляем временный файл
-    os.execute("rm " .. tmpFile .. " > /dev/null 2>&1")
-
-    -- обернем всё в pcall, чтобы ловить ошибки
-    local ok, content = pcall(function()
-        -- пробуем скачать файл
-        os.execute("wget -fq " .. url .. " " .. tmpFile .. " > /dev/null 2>&1")
-
-        -- пробуем открыть файл
-        local f = io.open(tmpFile, "r")
-        if not f then return nil end
-
-        local line = f:read("*l")
-        f:close()
-        return line
-    end)
-
-    if ok then
-        return content -- nil, если что-то не получилось
-    else
-        return nil -- ошибка wget или io.open
-    end
 end
 
 local function drawRightMenu()
@@ -1895,25 +1830,6 @@ local function drawStatus(num)
     buffer.drawChanges()
 end
 
-local function drawPorog()
-    local fl_y1 = 35
-    if flux_network == true then fl_y1 = 32 end
-    buffer.drawRectangle(123, fl_y1-1, 35, 4, colors.bg, 0, " ")
-    for i = 0, 35 - 1 do
-        buffer.drawText(123 + i, fl_y1-2, colors.bg, brailleChar(brail_console[1]))
-    end
-    for i = 0, 35 - 1 do
-        buffer.drawText(123 + i, fl_y1, colors.bg2, brailleChar(brail_console[2]))
-    end
-    buffer.drawText(124, fl_y1-1, colors.textclr, "Настройка порога жидкости:")
-    
-    drawDigit(124, fl_y1+1, brail_greenbtn, 0xa6ff00)
-    drawDigit(126, fl_y1+1, brail_redbtn, 0xff2121) 
-  
-    drawNumberWithText(144, fl_y1+1, porog, 2, colors.textclr, "Mb", colors.textclr)
-    buffer.drawChanges()
-end
-
 local function round(num, digits)
     local mult = 10 ^ (digits or 0)
     local result = math.floor(num * mult + 0.5) / mult
@@ -2230,18 +2146,6 @@ local function silentstop(num)
     end
 end
 
-local function updateMeProxy()
-    me_proxy = nil
-end
-
-local function checkFluid()
-    MeSecond = 0
-    fluidInMe = 0
-    offFluid = false
-    reason = nil
-    ismechecked = false
-end
-
 function onInterrupt()
     message("Обнаружено прерывание!", colors.msgerror)
     os.sleep(0.2)
@@ -2292,10 +2196,6 @@ local function reactorsChanged()
         end
     end
 
-    return false
-end
-
-local function meChanged()
     return false
 end
 
@@ -3025,169 +2925,6 @@ local function drawInfoMenu()
 end
 
 -- -----------------------------------------------------
-local function checkVer()
-    if updateCheck == true then
-        local update = false
-        local newVer = progVer
-
-        local ok = os.execute("wget -fq https://github.com/P1KaChU337/Reactor-Control-for-OpenComputers/raw/refs/heads/main/versions.txt versions.txt > /dev/null 2>&1")
-        if ok then
-            local f = io.open("versions.txt", "r")
-            if f then
-                local remoteVer = f:read("*l")
-                f:close()
-
-                if remoteVer and remoteVer ~= "" then
-                    local function verToTable(v)
-                        local t = {}
-                        for num in v:gmatch("%d+") do
-                            table.insert(t, tonumber(num))
-                        end
-                        return t
-                    end
-
-                    local function isNewer(v1, v2) -- v1 > v2 ?
-                        local a, b = verToTable(v1), verToTable(v2)
-                        for i = 1, math.max(#a, #b) do
-                            local n1, n2 = a[i] or 0, b[i] or 0
-                            if n1 > n2 then return true end
-                            if n1 < n2 then return false end
-                        end
-                        return false
-                    end
-
-                    if isNewer(remoteVer, progVer) then
-                        update = true
-                        newVer = remoteVer
-                    end
-                end
-            end
-        end
-
-        os.execute("rm versions.txt > /dev/null 2>&1")
-        os.execute("rm updater > /dev/null 2>&1")
-
-        if update == true then
-            message("Вышла новая версия программы...", nil, 34)
-            local verfile = io.open("oldVersion.txt", "w")
-            if verfile then
-                verfile:write(progVer)
-                verfile:close()
-            end
-            
-            if work == true and any_reactor_on == true then
-                stop()
-            end
-            local old = buffer.copy(1, 1, 160, 50)
-            buffer.drawRectangle(1, 1, 160, 50, 0x000000, 0, " ", 0.4)
-
-            buffer.drawRectangle(40, 22, 80, 6, 0xcccccc, 0, " ")
-            buffer.drawRectangle(39, 23, 82, 4, 0xcccccc, 0, " ")
-            local cornerPos = {
-                {39, 22, 1}, {120, 22, 2},
-                {120, 27, 3}, {39, 27, 4}
-            }
-            for _, c in ipairs(cornerPos) do
-                buffer.drawText(c[1], c[2], 0xcccccc, brailleChar(brail_status[c[3]]))
-            end
-            buffer.drawText(45, 23, 0x000000, "Доступно обновление Reactor Control by Flixmo (v" .. progVer ..", --> v" .. newVer .. ").")
-            buffer.drawText(43, 24, 0x000000, "Нажмите \"ОК\" для продолжения без обновления или \"Установить\" для обновления.")
-            animatedButton(1, 70, 25, "Ок", nil, nil, 6, nil, nil, 0x8100cc, 0xffffff)
-            animatedButton(1, 80, 25, "Установить", nil, nil, 10, nil, nil, 0x8100cc, 0xffffff)    
-
-            buffer.drawChanges()
-            while true do
-                local eventData = {event.pull(0.05)}
-                local eventType = eventData[1]
-                if eventType == "touch" then
-                    local _, _, x, y = table.unpack(eventData)
-
-                    if y >= 25 and y <= 27 and x >= 69 and x <= 76 then
-                        buffer.drawRectangle(69, 25, 7, 3, 0xcccccc, 0, " ")
-                        animatedButton(1, 70, 25, "Ок", nil, nil, 6, nil, nil, 0xa91df9, 0xffffff)
-                        animatedButton(2, 70, 25, "Ок", nil, nil, 6, nil, nil, 0xa91df9, 0xffffff)
-                        buffer.drawChanges()
-                        os.sleep(0.2)
-                        animatedButton(1, 70, 25, "Ок", nil, nil, 6, nil, nil, 0x8100cc, 0xffffff)
-                        buffer.drawChanges()
-
-                        buffer.paste(1, 1, old)
-                        buffer.drawChanges()
-                        message("Установка обновлений отменена!", nil, 34)
-                        break
-                    end
-
-                    if y >= 25 and y <= 27 and x >= 79 and x <= 90 then
-                        buffer.drawRectangle(79, 25, 11, 3, 0xcccccc, 0, " ")
-                        animatedButton(1, 80, 25, "Установить", nil, nil, 10, nil, nil, 0xa91df9, 0xffffff)
-                        animatedButton(2, 80, 25, "Установить", nil, nil, 10, nil, nil, 0xa91df9, 0xffffff)
-                        buffer.drawChanges()
-                        os.sleep(0.2)
-                        animatedButton(1, 80, 25, "Установить", nil, nil, 10, nil, nil, 0x8100cc, 0xffffff)
-                        buffer.drawChanges()
-                        os.sleep(0.5)
-                        buffer.drawRectangle(69, 25, 25, 3, 0xcccccc, 0, " ")
-                        buffer.drawText(70, 26, 0x767676, "Установка обновлений...")
-                        buffer.drawChanges()
-
-                        local ok = os.execute("wget -fq https://github.com/P1KaChU337/Reactor-Control-for-OpenComputers/raw/refs/heads/main/installer/updater.lua updater > /dev/null 2>&1")
-                        if not ok then
-                            buffer.paste(1, 1, old)
-                            message("Обновление прервано из-за ошибки!", colors.msgwarn, 34)
-                            os.execute("rm updater > /dev/null 2>&1")
-                            buffer.drawChanges()
-                            return
-                        end
-
-                        local f = io.open("updater", "r")
-                        if not f then
-                            buffer.paste(1, 1, old)
-                            message("Обновление прервано из-за ошибки!", colors.msgwarn, 34)
-                            os.execute("rm updater > /dev/null 2>&1")
-                            buffer.drawChanges()
-                            return
-                        end
-                        local content = f:read("*a")
-                        f:close()
-
-                        if not content or content == "" then
-                            buffer.paste(1, 1, old)
-                            message("Обновление прервано из-за ошибки!", colors.msgwarn, 34)
-                            os.execute("rm updater > /dev/null 2>&1")
-                            buffer.drawChanges()
-                            return
-                        end
-
-                        buffer.clear(0x000000)
-                        buffer.drawChanges()
-                        shell.execute("clear")
-                        rawset(_G, "__NR_ON_INTERRUPT__", nil)
-                        exit = true
-                        os.execute("updater")
-                        os.exit()
-                    end
-                end
-            end
-        end
-    end
-end
-
--- ----------------------------------------------------------------------------------------------------
-local function loadChangelog(url, tmpFile)
-    tmpFile = tmpFile or "/tmp/changelog.lua"
-    os.execute("wget -fq " .. url .. " " .. tmpFile .. " > /dev/null 2>&1")
-
-    local ok, chunk = pcall(loadfile, tmpFile)
-    if ok and chunk then
-        local ok2, data = pcall(chunk)
-        if ok2 and type(data) == "table" then
-            return data
-        end
-    end
-    return nil
-end
-
-
 local function handleChatCommand(nick, msg, args)
     -- Проверяем разрешения пользователя
     local hasPermission = false
