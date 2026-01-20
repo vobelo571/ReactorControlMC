@@ -672,6 +672,27 @@ local function safeCallwg(proxy, method, default, ...)
     return default
 end
 
+local function callMethodFlexible(proxy, method, ...)
+    -- Некоторые методы OC-драйверов работают как "free function" и НЕ ожидают self.
+    -- Пробуем оба варианта: with self и without self.
+    if not proxy or not proxy[method] then
+        return false, nil
+    end
+    local fn = proxy[method]
+
+    local ok, res = pcall(fn, proxy, ...)
+    if ok and res ~= nil then
+        return true, res
+    end
+
+    ok, res = pcall(fn, ...)
+    if ok and res ~= nil then
+        return true, res
+    end
+
+    return false, nil
+end
+
 local function secondsToHMS(totalSeconds)
     if type(totalSeconds) ~= "number" or totalSeconds < 0 then
         totalSeconds = 0
@@ -1550,9 +1571,10 @@ local function getFuelRodsFromSelectStatus(proxy)
 
     local agg = {}
     local any = false
-    for idx = 1, 64 do
-        local rod = safeCallwg(proxy, "getSelectStatusRod", nil, idx)
-        if type(rod) == "table" then
+    -- пробуем 0-based и 1-based индексы
+    for idx = 0, 64 do
+        local ok, rod = callMethodFlexible(proxy, "getSelectStatusRod", idx)
+        if ok and type(rod) == "table" then
             local kv = decodeKvArray(rod) or {}
             local itemId = tostring(kv.item or rod.itemName or rod.item or rod.name or "")
             if itemId == "" or itemId == "nil" then
@@ -3298,16 +3320,16 @@ local function handleChatCommand(nick, msg, args)
                 if reactors_proxy[i] and reactors_proxy[i].getSelectStatusRod then
                     chatBox.say("§7debug: getSelectStatusRod(1..3)")
                     for idx = 1, 3 do
-                        local r = safeCallwg(reactors_proxy[i], "getSelectStatusRod", nil, idx)
+                        local _, r = callMethodFlexible(reactors_proxy[i], "getSelectStatusRod", idx)
                         dumpRodRecordToChat(r, "sel[" .. tostring(idx) .. "]")
                     end
 
                     -- краткая сводка: сколько индексов вообще дают item
                     local filled = 0
                     local total = 0
-                    for idx = 1, 64 do
-                        local r = safeCallwg(reactors_proxy[i], "getSelectStatusRod", nil, idx)
-                        if type(r) == "table" then
+                    for idx = 0, 64 do
+                        local ok, r = callMethodFlexible(reactors_proxy[i], "getSelectStatusRod", idx)
+                        if ok and type(r) == "table" then
                             total = total + 1
                             local kv = decodeKvArray(r) or {}
                             local itemId = tostring(kv.item or "")
