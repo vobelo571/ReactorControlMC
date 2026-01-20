@@ -1627,8 +1627,12 @@ local function scanTransposersToChat()
             end
         end
     end
+    if tidx == 0 then
+        chatBox.say("§cТранспозеры не найдены.")
+        return
+    end
     if not foundAny then
-        chatBox.say("§cТранспозеры не найдены или не дают доступа к инвентарям.")
+        chatBox.say("§eТранспозеры найдены, но инвентари на сторонах 0..5 не видны (или стержней там нет).")
     end
 end
 
@@ -3113,7 +3117,13 @@ local function handleChatCommand(nick, msg, args)
         end
 
     elseif msg:match("^@tpscan") then
-        scanTransposersToChat()
+        if isChatBox then
+            chatBox.say("§7Сканирую транспозеры...")
+        end
+        local ok, err = pcall(scanTransposersToChat)
+        if not ok and isChatBox then
+            chatBox.say("§cОшибка tpscan: " .. tostring(err))
+        end
 
     elseif msg:match("^@start") then
         local num = tonumber(args:match("^(%d+)"))
