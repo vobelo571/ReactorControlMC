@@ -850,6 +850,9 @@ local function formatFuelTypeName(itemId)
     return short
 end
 
+-- forward declaration (нужно для вызова из UI-функций выше по файлу)
+local getFuelRodsFromSelectStatus
+
 local function refreshReactorRodsInfo(i)
     if not reactors_proxy[i] then
         reactor_rods_filled[i] = 0
@@ -1647,7 +1650,7 @@ local function extractCountFromKv(kv)
     )
 end
 
-local function getFuelRodsFromSelectStatus(proxy)
+getFuelRodsFromSelectStatus = function(proxy)
     -- Пытаемся получить состояние по каждому "индексу стержня".
     -- На практике метод есть в htc_reactors и требует integer index.
     if not proxy or not proxy.getSelectStatusRod then
