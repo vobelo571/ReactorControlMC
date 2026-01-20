@@ -100,7 +100,6 @@ local reactor_ConsumptionPerSecond = {}
 local reactor_level = {}
 local reactor_rods_filled = {}
 local reactor_rods_total = {}
-local reactor_rods_capacity = {}
 local reactor_rods_type = {}
 local reactor_rods_cache_at = {}
 local adapters_proxy = {}
@@ -894,16 +893,6 @@ local function refreshReactorRodsInfo(i)
         end
     end
 
-    -- Кэш ёмкости: если таблицы приходят только для занятых ячеек,
-    -- сохраняем максимум наблюдавшихся стержневых ячеек.
-    local cap = tonumber(reactor_rods_capacity[i]) or 0
-    if filledCells > cap then
-        cap = filledCells
-        reactor_rods_capacity[i] = cap
-    end
-    if cap > totalCells then
-        totalCells = cap
-    end
     if totalCells <= 0 then
         -- fallback: если поиндексный API временно недоступен
         totalCells = getRodTotalSlotsByLevel(reactor_level[i]) or 0
@@ -3707,30 +3696,27 @@ local function trim(s)
     return (s or ""):match("^%s*(.-)%s*$") or ""
 end
 
-local function handleChatEvent(nick, rawMsg)
-    -- очистить сообщение, привести к нижнему регистру и обрезать пробелы
-    local clean = trim(stripFormatting(tostring(rawMsg)):lower())
-
-    -- вытащить первую "словную" часть (команду) и остаток (аргументы)
-    local command = clean:match("^(%S+)")
-    local args = ""
-    if command then
-        args = clean:match("^%S+%s*(.*)$") or ""
-    end
-
-    -- если команда есть в списке — передаём в обработчик
-    if command and chatCommands[command] then
-        -- изменил сигнатуру: передаю команду и аргументы отдельно
-        handleChatCommand(nick, command, args)
-    end
-end
-
 local function chatMessageHandler()
     while not exit do
         local eventData = { event.pull(1, "chat_message") }
         if eventData[1] == "chat_message" then
             local _, _, nick, rawMsg = table.unpack(eventData)
-            handleChatEvent(nick, rawMsg)
+
+            -- очистить сообщение, привести к нижнему регистру и обрезать пробелы
+            local clean = trim(stripFormatting(tostring(rawMsg)):lower())
+
+            -- вытащить первую "словную" часть (команду) и остаток (аргументы)
+            local command = clean:match("^(%S+)")
+            local args = ""
+            if command then
+                args = clean:match("^%S+%s*(.*)$") or ""
+            end
+
+            -- если команда есть в списке — передаём в обработчик
+            if command and chatCommands[command] then
+                -- изменил сигнатуру: передаю команду и аргументы отдельно
+                handleChatCommand(nick, command, args)
+            end
         end
         os.sleep(0)
     end
@@ -4016,7 +4002,6 @@ local function mainLoop()
     reactor_level = {}
     reactor_rods_filled = {}
     reactor_rods_total = {}
-    reactor_rods_capacity = {}
     reactor_rods_type = {}
     reactor_rods_cache_at = {}
     
@@ -4071,6 +4056,7 @@ local function mainLoop()
     end
 
     if isChatBox then
+        chatThread = require("thread").create(chatMessageHandler)
         message("Чат-бокс подключен! Список команд: @help", colors.msginfo)
         chatBox.say("§2Чат-бокс подключен! §aСписок команд: @help")
     end
@@ -4265,9 +4251,6 @@ local function mainLoop()
         if eventType == "touch" then
             local _, _, x, y, button, uuid = table.unpack(eventData)
             handleTouch(x, y)
-        elseif eventType == "chat_message" then
-            local _, _, nick, rawMsg = table.unpack(eventData)
-            handleChatEvent(nick, rawMsg)
         end
         os.sleep(0)
     end
