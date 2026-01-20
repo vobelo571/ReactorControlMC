@@ -1347,7 +1347,8 @@ local function getFuelRodsFromBestTransposer()
         local tp = component.proxy(address)
         if tp then
             for side = 0, 5 do
-                local size = safeCall(tp, "getInventorySize", nil, side)
+                -- some implementations may return a string -> force numeric conversion via numeric default
+                local size = safeCall(tp, "getInventorySize", 0, side)
                 if type(size) == "number" and size > 0 then
                     local stacks = safeCall(tp, "getAllStacks", nil, side)
                     if type(stacks) == "table" and type(stacks.getAll) == "function" then
@@ -1574,7 +1575,8 @@ local function scanTransposersToChat()
         if tp then
             local anyInv = false
             for side = 0, 5 do
-                local size = safeCall(tp, "getInventorySize", nil, side)
+                -- some implementations may return a string -> force numeric conversion via numeric default
+                local size = safeCall(tp, "getInventorySize", 0, side)
                 if type(size) == "number" and size > 0 then
                     anyInv = true
                     foundAny = true
