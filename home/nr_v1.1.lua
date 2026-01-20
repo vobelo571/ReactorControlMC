@@ -100,6 +100,7 @@ local reactor_ConsumptionPerSecond = {}
 local reactor_level = {}
 local reactor_rods_filled = {}
 local reactor_rods_total = {}
+local reactor_rods_capacity = {}
 local reactor_rods_type = {}
 local reactor_rods_cache_at = {}
 local adapters_proxy = {}
@@ -816,11 +817,8 @@ local function formatRFwidgets(value)
 end
 
 local function getRodTotalSlotsByLevel(level)
-    -- Общее количество позиций в сетке стержней в GUI.
-    -- ВАЖНО: внутри могут стоять "реакторные обшивки", их учитывать не нужно:
-    -- реальная ёмкость по стержням = (позиции, где реально может стоять стержень) * уровень.
-    -- Эти "позиции под стержни" мы берём из getSelectStatusRod (кол-во table-ответов).
-    -- Но если по какой-то причине API недоступен — fallback на 24.
+    -- Фоллбек: общее количество позиций в сетке стержней в GUI (24).
+    -- Реальную "ёмкость под стержни" (без обшивок) мы вычисляем динамически как max наблюдавшихся занятых ячеек.
     local lvl = tonumber(level)
     if lvl and lvl >= 1 then
         return 24
@@ -868,10 +866,9 @@ local function refreshReactorRodsInfo(i)
 
     -- Для UI нам нужно:
     -- 1) Сколько ячеек занято стержнями (filledCells)
-    -- 2) Сколько всего ячеек "под стержни" (totalCells) — без реакторных обшивок
+    -- 2) Сколько всего ячеек "под стержни" (capacityCells) — без реакторных обшивок
     -- 3) Основной тип топлива (по самому частому itemId)
     local filledCells = 0
-    local totalCells = 0
     local countsByItem = {}
 
     if reactors_proxy[i] and reactors_proxy[i].getSelectStatusRod then
@@ -879,7 +876,6 @@ local function refreshReactorRodsInfo(i)
         for idx = 0, 64 do
             local ok, rod = callMethodFlexible(reactors_proxy[i], "getSelectStatusRod", idx)
             if ok and type(rod) == "table" then
-                totalCells = totalCells + 1
                 -- формат как key-value массив: {"item", "<id>", "type", "...", ...}
                 local itemId = nil
                 if rod[1] == "item" and type(rod[2]) == "string" then
@@ -893,9 +889,16 @@ local function refreshReactorRodsInfo(i)
         end
     end
 
-    if totalCells <= 0 then
-        -- fallback: если поиндексный API временно недоступен
-        totalCells = getRodTotalSlotsByLevel(reactor_level[i]) or 0
+    -- "всего" считаем как динамическую емкость: максимум наблюдавшихся занятых ячеек
+    local cap = tonumber(reactor_rods_capacity[i]) or 0
+    if filledCells > cap then
+        cap = filledCells
+        reactor_rods_capacity[i] = cap
+    end
+    if cap <= 0 then
+        -- если ещё ни разу не видели установленных стержней — fallback на 24 (GUI-сетка)
+        cap = getRodTotalSlotsByLevel(reactor_level[i]) or 0
+        reactor_rods_capacity[i] = cap
     end
 
     local mainType = nil
@@ -908,7 +911,7 @@ local function refreshReactorRodsInfo(i)
     end
 
     reactor_rods_filled[i] = filledCells
-    reactor_rods_total[i] = totalCells
+    reactor_rods_total[i] = cap
     reactor_rods_type[i] = mainType and formatFuelTypeName(mainType) or "-"
     reactor_rods_cache_at[i] = computer.uptime()
 end
@@ -979,16 +982,11 @@ local function drawWidgets()
             buffer.drawText(x + 6,  y + 1,  colors.textclr, "Реактор #" .. i)
             buffer.drawText(x + 4,  y + 2,  colors.textclr, "Нагрев: " .. (temperature[i] or "-") .. "°C")
             buffer.drawText(x + 4,  y + 3,  colors.textclr, formatRFwidgets(reactor_rf[i]))
-            local cellsFilled = tonumber(reactor_rods_filled[i]) or 0
-            local cellsTotal = reactor_rods_total[i]
-            local lvl = tonumber(reactor_level[i]) or 1
-            if lvl < 1 then lvl = 1 end
-
-            local rodsFilled = cellsFilled * lvl
-            local rodsLine = "Стержни: " .. tostring(rodsFilled)
-            if type(cellsTotal) == "number" and cellsTotal > 0 then
-                local rodsTotal = cellsTotal * lvl
-                rodsLine = rodsLine .. "/" .. tostring(rodsTotal)
+            local filled = tonumber(reactor_rods_filled[i]) or 0
+            local total = reactor_rods_total[i]
+            local rodsLine = "Стержни: " .. tostring(filled)
+            if type(total) == "number" and total > 0 then
+                rodsLine = rodsLine .. "/" .. tostring(total)
             end
             buffer.drawText(x + 4,  y + 4,  colors.textclr, rodsLine)
             buffer.drawText(x + 4,  y + 5,  colors.textclr, "Топливо: " .. tostring(reactor_rods_type[i] or "-"))
@@ -4002,6 +4000,7 @@ local function mainLoop()
     reactor_level = {}
     reactor_rods_filled = {}
     reactor_rods_total = {}
+    reactor_rods_capacity = {}
     reactor_rods_type = {}
     reactor_rods_cache_at = {}
     
