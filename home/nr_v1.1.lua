@@ -47,7 +47,6 @@ if not fs.exists(configPath) then
         file:write("theme = false -- (false темная, true светлая)\n\n")
         file:write("updateCheck = true -- (false не проверять на наличие обновлений, true проверять обновления)\n\n")
         file:write("debugLog = false\n\n")
-        file:write("autoWork = false -- Авто-работа: авто-стоп если не хватает стержней; авто-старт только при установке всех стержней\n\n")
         file:write("isFirstStart = true\n\n")
         file:write("-- После внесение изменений сохраните данные (Ctrl+S) и выйдите из редактора (Ctrl+W)\n")
         file:write("-- Если в будущем захотите поменять данные то пропишите \"cd data\" затем \"edit config.lua\"\n")
@@ -64,8 +63,6 @@ if not ok then
     io.stderr:write("Ошибка загрузки конфига: " .. tostring(err) .. "\n")
     return
 end
-
-if autoWork == nil then autoWork = false end
 
 local any_reactor_on = false
 local any_reactor_off = false
@@ -100,19 +97,10 @@ local reactor_getcoolant = {}
 local reactor_maxcoolant = {}
 local reactor_depletionTime = {}
 local reactor_ConsumptionPerSecond = {}
-local reactor_rod_counts = {}
-local reactor_rod_summary = {}
-local reactor_rod_count = {}
-local reactor_rod_max = {}
-local reactor_rod_types = {}
 local reactor_level = {}
 local adapters_proxy = {}
 local adapters_address = {}
 local reactor_adapter_index = {}
-local reactor_rods_blocked = {}
-local reactor_rods_side = {}
-local reactor_rods_slots = {}
-local reactor_rods_stackMax = {}
 local last_me_address = nil
 local me_network = false
 local me_proxy = nil
@@ -189,34 +177,7 @@ local colors = {
 
 -- ----------------------------------------------------------------------------------------------------
 
-local rod_types = {
-    ["htc_reactors:quad_uranium_fuel_rod"] = "Уран x4",
-    ["htc_reactors:sixteen_uraium_fuel_rod"] = "Уран x16",
-    ["htc_reactors:quad_mox_fuel_rod"] = "MOX x4",
-    ["htc_reactors:sixteen_mox_fuel_rod"] = "MOX x16",
-    ["htc_reactors:quad_californium_fuel_rod"] = "Калифорний x4",
-    ["htc_reactors:quad_ksirviz_fuel_rod"] = "Ксирд.-Визамиум x4",
-}
-
-local UNKNOWN_ROD_ID = "__unknown_rod__"
-
-local rod_order = {
-    "htc_reactors:quad_uranium_fuel_rod",
-    "htc_reactors:sixteen_uraium_fuel_rod",
-    "htc_reactors:quad_mox_fuel_rod",
-    "htc_reactors:sixteen_mox_fuel_rod",
-    "htc_reactors:quad_californium_fuel_rod",
-    "htc_reactors:quad_ksirviz_fuel_rod",
-}
-
-local rod_aliases = {
-    ["quad_uranium_fuel_rod"] = "htc_reactors:quad_uranium_fuel_rod",
-    ["sixteen_uraium_fuel_rod"] = "htc_reactors:sixteen_uraium_fuel_rod",
-    ["quad_mox_fuel_rod"] = "htc_reactors:quad_mox_fuel_rod",
-    ["sixteen_mox_fuel_rod"] = "htc_reactors:sixteen_mox_fuel_rod",
-    ["quad_californium_fuel_rod"] = "htc_reactors:quad_californium_fuel_rod",
-    ["quad_ksirviz_fuel_rod"] = "htc_reactors:quad_ksirviz_fuel_rod",
-}
+-- Блок обработки топливных стержней удалён по запросу пользователя.
 
 local function brailleChar(dots)
     return unicode.char(
@@ -436,7 +397,6 @@ local function saveCfg(param)
     file:write(string.format("theme = %s -- Тема интерфейса (false тёмная, true светлая)\n\n", tostring(theme)))
     file:write(string.format("updateCheck = %s -- (false не проверять на наличие обновлений, true проверять обновления)\n\n", tostring(updateCheck)))
     file:write(string.format("debugLog = %s\n\n", tostring(debugLog)))
-    file:write(string.format("autoWork = %s -- Авто-работа: авто-стоп если не хватает стержней; авто-старт только при установке всех стержней\n\n", tostring(autoWork)))
     file:write(string.format("isFirstStart = %s\n\n", tostring(isFirstStart)))
     file:write("-- После внесение изменений сохраните данные (Ctrl+S) и выйдите из редактора (Ctrl+W)\n")
     file:write("-- Для запуска основой программы перейдите в домашнюю директорию \"cd ..\", и напишите \"main.lua\"\n")
@@ -500,16 +460,7 @@ local function initReactors()
         temperature[i] = 0
         reactor_aborted[i] = false
         reactor_depletionTime[i] = 0
-        reactor_rod_counts[i] = {}
-        reactor_rod_summary[i] = "н/д"
-        reactor_rod_count[i] = 0
-        reactor_rod_max[i] = 0
-        reactor_rod_types[i] = "н/д"
         reactor_level[i] = 1
-        reactor_rods_blocked[i] = false
-        reactor_rods_side[i] = nil
-        reactor_rods_slots[i] = nil
-        reactor_rods_stackMax[i] = nil
     end
 end
 
@@ -874,11 +825,6 @@ local function drawWidgets()
             buffer.drawText(x + 4,  y + 4,  colors.textclr, "Тип: " .. (reactor_type[i] or "-"))
             buffer.drawText(x + 4,  y + 5,  colors.textclr, "Запущен: " .. (reactor_work[i] and "Да" or "Нет"))
             buffer.drawText(x + 4,  y + 6,  colors.textclr, "Распад: " .. secondsToHMS(reactor_depletionTime[i] or 0))
-            buffer.drawText(x + 4,  y + 7,  colors.textclr, shortenText("Стержни: " .. (reactor_rod_types[i] or "н/д"), 18))
-            local countText = (reactor_rod_count[i] ~= nil and reactor_rod_max[i] ~= nil)
-                and (tostring(reactor_rod_count[i]) .. "/" .. tostring(reactor_rod_max[i]))
-                or "н/д"
-            buffer.drawText(x + 4,  y + 8,  colors.textclr, "Кол-во: " .. countText)
             animatedButton(1, x + 6, y + 9, (reactor_work[i] and "Отключить" or "Включить"), nil, nil, 10, nil, nil, (reactor_work[i] and 0xfd3232 or 0x2beb1a))
             if reactor_type[i] == "Fluid" then
                 drawVerticalProgressBar(x + 1, y + 1, 9, reactor_getcoolant[i], reactor_maxcoolant[i], 0x0044FF, 0x00C8FF, colors.bg2)
@@ -1197,122 +1143,6 @@ local function safeCall(proxy, method, default, ...)
     return default
 end
 
-local function extractRodId(rod)
-    local rodType = type(rod)
-    if rodType ~= "table" and rodType ~= "userdata" then
-        return nil
-    end
-    local function normalizeToId(value)
-        if type(value) ~= "string" then
-            return nil
-        end
-        if value:find(":") then
-            return value
-        end
-        local key = value:lower()
-        key = key:gsub("%s+", "_")
-        key = key:gsub("[-]", "_")
-        if rod_aliases[key] then
-            return rod_aliases[key]
-        end
-        local hasQuad = key:find("quad") or key:find("x4") or key:find("4x")
-        local hasSixteen = key:find("sixteen") or key:find("x16") or key:find("16x") or key:find("16")
-        if key:find("uran") then
-            return hasSixteen and "htc_reactors:sixteen_uraium_fuel_rod" or (hasQuad and "htc_reactors:quad_uranium_fuel_rod" or nil)
-        end
-        if key:find("mox") then
-            return hasSixteen and "htc_reactors:sixteen_mox_fuel_rod" or (hasQuad and "htc_reactors:quad_mox_fuel_rod" or nil)
-        end
-        if key:find("californium") then
-            return "htc_reactors:quad_californium_fuel_rod"
-        end
-        if key:find("ksir") or key:find("viz") then
-            return "htc_reactors:quad_ksirviz_fuel_rod"
-        end
-        if key:find("rod") or key:find("fuel_rod") or key:find("fuelrod") or key:find("стерж") or key:find("твэл") then
-            return UNKNOWN_ROD_ID
-        end
-        return nil
-    end
-
-    local function safeIndex(obj, key)
-        local ok, v = pcall(function() return obj[key] end)
-        if not ok then return nil end
-        if type(v) == "function" then
-            local ok2, v2 = pcall(v, obj)
-            if ok2 then return v2 end
-            return nil
-        end
-        return v
-    end
-
-    local function safeCallMethod(obj, name)
-        local fn = safeIndex(obj, name)
-        if type(fn) == "function" then
-            local ok, v = pcall(fn, obj)
-            if ok then return v end
-        end
-        return nil
-    end
-
-    local direct = {
-        tostring(rod),
-        safeIndex(rod, "name"),
-        safeIndex(rod, "label"),
-        safeIndex(rod, "id"),
-        safeIndex(rod, "item"),
-        safeIndex(rod, "itemName"),
-        safeIndex(rod, "itemId"),
-        safeIndex(rod, "type"),
-        safeIndex(rod, "unlocalizedName"),
-        safeCallMethod(rod, "name"),
-        safeCallMethod(rod, "label"),
-        safeCallMethod(rod, "id"),
-        safeCallMethod(rod, "getName"),
-        safeCallMethod(rod, "getLabel"),
-        safeCallMethod(rod, "getId"),
-        safeIndex(rod, 1),
-        safeIndex(rod, 2),
-        safeIndex(rod, 3),
-        safeIndex(rod, 4),
-        safeIndex(rod, 5),
-        safeIndex(rod, 6),
-        safeIndex(rod, "stack"),
-        safeIndex(rod, "itemStack"),
-    }
-    for _, value in ipairs(direct) do
-        local id = normalizeToId(value)
-        if id then
-            return id
-        end
-        if type(value) == "table" then
-            local nested = value.name or value.id or value.item or value.itemName or value.itemId or value[1]
-            id = normalizeToId(nested)
-            if id then
-                return id
-            end
-        end
-    end
-
-    if rodType == "table" then
-        for _, value in pairs(rod) do
-            local id = normalizeToId(value)
-            if id then
-                return id
-            end
-            if type(value) == "table" then
-                for _, v2 in pairs(value) do
-                    id = normalizeToId(v2)
-                    if id then
-                        return id
-                    end
-                end
-            end
-        end
-    end
-    return nil
-end
-
 local function getInventorySize(proxy)
     local size = safeCall(proxy, "getInventorySize", nil)
     if type(size) == "number" and size > 0 then
@@ -1370,401 +1200,6 @@ local function getAllStacks(proxy, side)
     return nil
 end
 
-local function isDurableStack(stack)
-    if type(stack) ~= "table" then
-        return false
-    end
-    local maxDamage = tonumber(stack.maxDamage) or tonumber(stack.max_dmg) or tonumber(stack.maxdamage)
-    local damage = tonumber(stack.damage) or tonumber(stack.dmg)
-    local maxDur = tonumber(stack.maxDurability) or tonumber(stack.max_durability) or tonumber(stack.maxdurability)
-    local dur = tonumber(stack.durability)
-    if (maxDamage and maxDamage > 0) or (maxDur and maxDur > 0) then
-        return true
-    end
-    if (damage and damage > 0) or (dur and dur > 0) then
-        return true
-    end
-    -- В некоторых сборках OpenComputers не отдаёт поля прочности (maxDamage/damage),
-    -- поэтому дополнительно считаем предмет "стержнем", если он распознаётся extractRodId().
-    if extractRodId(stack) ~= nil then
-        return true
-    end
-    return false
-end
-
-local function getStackCount(stack)
-    local count = tonumber(stack.size) or tonumber(stack.count) or 1
-    if type(stack.size) == "function" then
-        local ok, v = pcall(stack.size, stack)
-        if ok and tonumber(v) then count = tonumber(v) end
-    end
-    if type(stack.count) == "function" then
-        local ok, v = pcall(stack.count, stack)
-        if ok and tonumber(v) then count = tonumber(v) end
-    end
-    return math.max(count, 1)
-end
-
-local function getStackMaxSize(stack)
-    local maxSize = tonumber(stack.maxSize) or tonumber(stack.max_size) or tonumber(stack.maxStackSize) or tonumber(stack.max_stack_size) or tonumber(stack.maxCount) or tonumber(stack.max_count)
-    if type(stack.maxSize) == "function" then
-        local ok, v = pcall(stack.maxSize, stack)
-        if ok and tonumber(v) then maxSize = tonumber(v) end
-    end
-    if type(stack.maxStackSize) == "function" then
-        local ok, v = pcall(stack.maxStackSize, stack)
-        if ok and tonumber(v) then maxSize = tonumber(v) end
-    end
-    if maxSize and maxSize > 0 then
-        return maxSize
-    end
-    return nil
-end
-
-local function isFuelRodStack(stack)
-    local id = extractRodId(stack)
-    if not id then
-        return false, nil
-    end
-    if id == UNKNOWN_ROD_ID then
-        return true, id
-    end
-    if rod_types[id] then
-        return true, id
-    end
-    local low = tostring(id):lower()
-    if (low:find("fuel") and low:find("rod")) or low:find("fuel_rod") or low:find("fuelrod") or low:find("rod") then
-        return true, id
-    end
-    return false, nil
-end
-
-local function countRodBufferFromAdapter(adapterProxy, preferredSide, fallbackMaxStack)
-    if not adapterProxy then
-        return nil
-    end
-
-    local function getInvSize(side)
-        if side == nil then
-            return safeCall(adapterProxy, "getInventorySize", nil)
-        end
-        return safeCall(adapterProxy, "getInventorySize", nil, side)
-    end
-
-    local function scanSide(side)
-        local size = getInvSize(side)
-        if type(size) ~= "number" or size <= 0 then
-            return nil
-        end
-
-        local counts = {}
-        local total = 0
-        local maxStack = fallbackMaxStack or 1
-        local sawRod = false
-
-        for slot = 1, size do
-            local stack = getStackInSlot(adapterProxy, side, slot)
-            local st = type(stack)
-            if st == "table" or st == "userdata" then
-                local okRod, id = isFuelRodStack(stack)
-                if okRod then
-                    sawRod = true
-                    local amount = getStackCount(stack)
-                    counts[id] = (counts[id] or 0) + amount
-                    total = total + amount
-                    local ms = getStackMaxSize(stack)
-                    if ms and ms > maxStack then
-                        maxStack = ms
-                    end
-                end
-            end
-        end
-
-        return {
-            side = side,
-            slots = size,
-            maxStack = maxStack,
-            counts = counts,
-            total = total,
-            sawRod = sawRod,
-        }
-    end
-
-    -- сначала пробуем инвентарь без side (иногда именно так отдаёт адаптер)
-    local r0 = scanSide(nil)
-    if r0 and r0.sawRod then
-        local maxTotal = (r0.slots or 0) * (r0.maxStack or 1)
-        return r0.counts, r0.total, maxTotal, r0.side, r0.slots, r0.maxStack
-    end
-
-    -- если уже известна сторона буфера, используем её даже когда буфер пуст
-    if preferredSide ~= nil then
-        local r = scanSide(preferredSide)
-        if r and r.slots and r.slots > 0 then
-            local maxTotal = (r.slots or 0) * (r.maxStack or 1)
-            return r.counts, r.total, maxTotal, r.side, r.slots, r.maxStack
-        end
-    end
-
-    -- иначе ищем сторону где реально лежат стержни
-    local best = nil
-    for side = 0, 5 do
-        local r = scanSide(side)
-        if r then
-            if r.sawRod then
-                if not best or (r.total > best.total) or (r.total == best.total and r.slots > best.slots) then
-                    best = r
-                end
-            end
-        end
-    end
-
-    if best then
-        local maxTotal = (best.slots or 0) * (best.maxStack or 1)
-        return best.counts, best.total, maxTotal, best.side, best.slots, best.maxStack
-    end
-
-    return nil
-end
-
-local function countRodsFromStatus(proxy)
-    local rods = safeCallwg(proxy, "getAllFuelRodsStatus", nil)
-    if type(rods) ~= "table" then
-        return nil
-    end
-    local counts = {}
-    local installed = 0
-    local slots = 0
-    for _, rod in ipairs(rods) do
-        slots = slots + 1
-        local id = extractRodId(rod)
-        if id then
-            installed = installed + 1
-            counts[id] = (counts[id] or 0) + 1
-        end
-    end
-    return counts, installed, slots
-end
-
-local function countRodsFromInventory(proxy)
-    local size, side = getInventorySize(proxy)
-    if not size then
-        return nil
-    end
-    local counts = {}
-    local total = 0
-    local minSlot = nil
-    local maxSlot = nil
-    for slot = 1, size do
-        local stack = getStackInSlot(proxy, side, slot)
-        local st = type(stack)
-        if st == "table" or st == "userdata" then
-            if isDurableStack(stack) then
-                local id = extractRodId(stack) or UNKNOWN_ROD_ID
-                local amount = tonumber(stack.size) or tonumber(stack.count) or 1
-                counts[id] = (counts[id] or 0) + math.max(amount, 1)
-                total = total + math.max(amount, 1)
-                if minSlot == nil or slot < minSlot then minSlot = slot end
-                if maxSlot == nil or slot > maxSlot then maxSlot = slot end
-            end
-        end
-    end
-    if minSlot ~= nil and maxSlot ~= nil then
-        return counts, total, (maxSlot - minSlot + 1)
-    end
-    return nil
-end
-
-local function countRodsFromInventoryAllSides(proxy)
-    if not proxy then
-        return nil
-    end
-    local counts = {}
-    local total = 0
-    local maxSlots = 0
-    local found = false
-    for side = 0, 5 do
-        local size = safeCall(proxy, "getInventorySize", nil, side)
-        if type(size) == "number" and size > 0 then
-            found = true
-            local minSlot = nil
-            local maxSlot = nil
-            for slot = 1, size do
-                local stack = getStackInSlot(proxy, side, slot)
-                local st = type(stack)
-                if st == "table" or st == "userdata" then
-                    if isDurableStack(stack) then
-                        local id = extractRodId(stack) or UNKNOWN_ROD_ID
-                        local amount = tonumber(stack.size) or tonumber(stack.count) or 1
-                        counts[id] = (counts[id] or 0) + math.max(amount, 1)
-                        total = total + math.max(amount, 1)
-                        if minSlot == nil or slot < minSlot then minSlot = slot end
-                        if maxSlot == nil or slot > maxSlot then maxSlot = slot end
-                    end
-                end
-            end
-            if minSlot ~= nil and maxSlot ~= nil then
-                maxSlots = maxSlots + (maxSlot - minSlot + 1)
-            end
-        else
-            local stacks = getAllStacks(proxy, side)
-            if type(stacks) == "table" then
-                found = true
-                local minSlot = nil
-                local maxSlot = nil
-                for _, stack in pairs(stacks) do
-                    local st = type(stack)
-                    if st == "table" or st == "userdata" then
-                        if isDurableStack(stack) then
-                            local id = extractRodId(stack) or UNKNOWN_ROD_ID
-                            local amount = tonumber(stack.size) or tonumber(stack.count) or 1
-                            counts[id] = (counts[id] or 0) + math.max(amount, 1)
-                            total = total + math.max(amount, 1)
-                        end
-                    end
-                end
-                for k, v in pairs(stacks) do
-                    local vt = type(v)
-                    if (vt == "table" or vt == "userdata") and isDurableStack(v) then
-                        local nk = tonumber(k)
-                        if nk then
-                            if minSlot == nil or nk < minSlot then minSlot = nk end
-                            if maxSlot == nil or nk > maxSlot then maxSlot = nk end
-                        end
-                    end
-                end
-                if minSlot ~= nil and maxSlot ~= nil then
-                    maxSlots = maxSlots + (maxSlot - minSlot + 1)
-                end
-            end
-        end
-    end
-    if not found then
-        return nil
-    end
-    if total <= 0 or maxSlots <= 0 then
-        return nil
-    end
-    return counts, total, maxSlots
-end
-
-local function formatRodCounts(counts)
-    if counts == nil then
-        return "н/д"
-    end
-    if next(counts) == nil then
-        return "нет"
-    end
-    local parts = {}
-    local unknown = 0
-    for _, id in ipairs(rod_order) do
-        local count = counts[id]
-        if count and count > 0 then
-            table.insert(parts, rod_types[id] .. ": " .. tostring(count))
-        end
-    end
-    for id, count in pairs(counts) do
-        if id == UNKNOWN_ROD_ID then
-            unknown = unknown + (tonumber(count) or 0)
-        elseif not rod_types[id] then
-            unknown = unknown + (tonumber(count) or 0)
-        end
-    end
-    if unknown > 0 then
-        table.insert(parts, "Неизв.: " .. tostring(unknown))
-    end
-    if #parts == 0 then
-        return "нет"
-    end
-    return table.concat(parts, ", ")
-end
-
-local function formatRodTypes(counts)
-    if counts == nil then
-        return "н/д"
-    end
-    if next(counts) == nil then
-        return "нет"
-    end
-    local types = {}
-    local seen = {}
-    local hasUnknown = false
-    for _, id in ipairs(rod_order) do
-        if counts[id] and counts[id] > 0 then
-            local label = rod_types[id]
-            if label and not seen[label] then
-                table.insert(types, label)
-                seen[label] = true
-            end
-        end
-    end
-    for id, count in pairs(counts) do
-        if id == UNKNOWN_ROD_ID and (tonumber(count) or 0) > 0 then
-            hasUnknown = true
-        elseif not rod_types[id] and (tonumber(count) or 0) > 0 then
-            hasUnknown = true
-        end
-    end
-    if hasUnknown then
-        table.insert(types, "Неизв.")
-    end
-    if #types == 0 then
-        return "нет"
-    end
-    return table.concat(types, ", ")
-end
-
-local function normalizeFuelType(value)
-    if type(value) ~= "string" then
-        return nil
-    end
-    local key = value:lower()
-    if key:find("uran") then
-        return "Уран"
-    end
-    if key:find("mox") then
-        return "MOX"
-    end
-    if key:find("californium") then
-        return "Калифорний"
-    end
-    if key:find("ksir") or key:find("viz") then
-        return "Ксирд.-Визамиум"
-    end
-    return nil
-end
-
-local function getFuelTypeLabel(proxy)
-    if not proxy then
-        return nil
-    end
-    local methods = {
-        "getFuelType",
-        "getFuelName",
-        "getActiveFuel",
-        "getFuelInfo",
-        "getFuelStack",
-    }
-    for _, method in ipairs(methods) do
-        local result = safeCall(proxy, method, nil)
-        if type(result) == "string" then
-            local label = normalizeFuelType(result)
-            if label then
-                return label
-            end
-        elseif type(result) == "table" then
-            local nested = result.name or result.label or result.type or result.fuel
-            if type(nested) == "string" then
-                local label = normalizeFuelType(nested)
-                if label then
-                    return label
-                end
-            end
-        end
-    end
-    return nil
-end
-
 local function getReactorLevel(proxy)
     if not proxy then
         return 1
@@ -1783,95 +1218,6 @@ local function getReactorLevel(proxy)
         end
     end
     return 1
-end
-
-local function updateRodData(num)
-    for i = num or 1, num or reactors do
-        local proxy = reactors_proxy[i]
-        local counts = nil
-        local maxCount = 0
-        local totalCount = 0
-        if proxy then
-            reactor_level[i] = getReactorLevel(proxy) or 1
-            -- Стержни считаем через адаптер (буфер справа). Запоминаем сторону, слоты и максимальный стак,
-            -- чтобы корректно показывать 0/Max когда стержни выработались.
-            local aidx = reactor_adapter_index[i]
-            if aidx and adapters_proxy[aidx] then
-                local c, t, m, side, slots, maxStack = countRodBufferFromAdapter(
-                    adapters_proxy[aidx],
-                    reactor_rods_side[i],
-                    reactor_rods_stackMax[i]
-                )
-                if c ~= nil and (m or 0) > 0 then
-                    counts, totalCount, maxCount = c, t or 0, m or 0
-                    reactor_rods_side[i] = side
-                    reactor_rods_slots[i] = slots
-                    reactor_rods_stackMax[i] = maxStack
-                end
-            end
-
-            if (maxCount or 0) <= 0 and #adapters_proxy > 0 then
-                local foundCounts, foundTotal, foundMax, foundSide, foundSlots, foundStack = nil, 0, 0, nil, nil, nil
-                local foundIndex = nil
-                local foundCount = 0
-                for idx, aproxy in ipairs(adapters_proxy) do
-                    local c, t, m, side, slots, maxStack = countRodBufferFromAdapter(
-                        aproxy,
-                        reactor_rods_side[i],
-                        reactor_rods_stackMax[i]
-                    )
-                    if c ~= nil and (m or 0) > 0 then
-                        foundCount = foundCount + 1
-                        foundCounts, foundTotal, foundMax = c, t or 0, m or 0
-                        foundSide, foundSlots, foundStack = side, slots, maxStack
-                        foundIndex = idx
-                    end
-                end
-                if foundCount == 1 then
-                    reactor_adapter_index[i] = foundIndex
-                    counts, totalCount, maxCount = foundCounts, foundTotal, foundMax
-                    reactor_rods_side[i] = foundSide
-                    reactor_rods_slots[i] = foundSlots
-                    reactor_rods_stackMax[i] = foundStack
-                end
-            end
-        end
-        reactor_rod_counts[i] = counts or {}
-        reactor_rod_summary[i] = formatRodCounts(counts)
-        if (totalCount or 0) > 0 and (counts == nil or next(counts) == nil) then
-            local fuelLabel = getFuelTypeLabel(proxy)
-            reactor_rod_types[i] = fuelLabel or "Неизв."
-        else
-            reactor_rod_types[i] = formatRodTypes(counts)
-        end
-        if counts == nil then
-            local fuelLabel = getFuelTypeLabel(proxy)
-            if fuelLabel then
-                reactor_rod_types[i] = fuelLabel
-            end
-        end
-        if (maxCount or 0) > 0 then
-            reactor_rod_count[i] = totalCount or 0
-            reactor_rod_max[i] = maxCount
-        else
-            reactor_rod_count[i] = nil
-            reactor_rod_max[i] = nil
-        end
-    end
-end
-
-local function hasRodInfo(i)
-    local c = reactor_rod_count[i]
-    local m = reactor_rod_max[i]
-    return type(c) == "number" and type(m) == "number" and m > 0
-end
-
-local function rodsComplete(i)
-    return hasRodInfo(i) and (reactor_rod_count[i] >= reactor_rod_max[i])
-end
-
-local function rodsMissing(i)
-    return hasRodInfo(i) and (reactor_rod_count[i] < reactor_rod_max[i])
 end
 
 local function checkReactorStatus(num)
@@ -2268,7 +1614,6 @@ local function updateReactorData(num)
             reactor_maxcoolant[i] = safeCall(proxy, "getMaxFluidCoolant", 0) or 1
         end
     end
-    updateRodData(num)
     drawWidgets()
     drawRFinfo()
 end
@@ -2279,23 +1624,11 @@ local function start(num)
     else
         message("Запуск реакторов...", colors.textclr, 34)
     end
-    if autoWork == true then
-        updateRodData(num)
-    end
     for i = num or 1, num or reactors do
         local rType = reactor_type[i]
         local proxy = reactors_proxy[i]
 
-
-        if autoWork == true and not rodsComplete(i) then
-            reactor_rods_blocked[i] = true
-            starting = true
-            if hasRodInfo(i) then
-                message("Реактор #" .. i .. " не запущен: не хватает стержней (" .. tostring(reactor_rod_count[i]) .. "/" .. tostring(reactor_rod_max[i]) .. ")", colors.msgwarn, 34)
-            else
-                message("Реактор #" .. i .. " не запущен: нет данных о стержнях", colors.msgwarn, 34)
-            end
-        elseif rType == "Fluid" then
+        if rType == "Fluid" then
             if offFluid == false then
                 safeCall(proxy, "activate")
                 reactor_work[i] = true
@@ -2614,7 +1947,7 @@ local function drawSettingsMenu()
         stop()
     end
 
-    local modalX, modalY, modalW, modalH = 35, 10, 65, 26 -- Размеры модального окна, w - ширина, h - высота
+    local modalX, modalY, modalW, modalH = 35, 10, 65, 23 -- Размеры модального окна, w - ширина, h - высота
     local old = buffer.copy(1, 1, 160, 50)
     buffer.drawRectangle(1, 1, 160, 50, 0x000000, 0, " ", 0.4)
     buffer.drawRectangle(modalX, modalY, modalW, modalH, 0xcccccc, 0, " ")
@@ -2650,13 +1983,6 @@ local function drawSettingsMenu()
     local sw3_state = debugLog -- текущее состояние
     local sw3_pipePos = (sw3_state and (sw3_w - 2) or 1)   -- позиция (1 - лево, sw3_w-2 - право)
     drawSwitch(sw3_x, sw3_y, sw3_w, sw3_pipePos, sw3_state, nil, 0x777777, nil, 0x444444)
-
-    buffer.drawText(modalX + 5, modalY + 19, 0x000000, "Авто-работа")
-    animatedButton(1, modalX + 4, modalY + 20, "Включенно         ", nil, nil, 20, nil, nil, 0x444444, 0xffffff)
-    local sw4_x, sw4_y, sw4_w = modalX+16, modalY+21, 7
-    local sw4_state = autoWork -- текущее состояние
-    local sw4_pipePos = (sw4_state and (sw4_w - 2) or 1)
-    drawSwitch(sw4_x, sw4_y, sw4_w, sw4_pipePos, sw4_state, nil, 0x777777, nil, 0x444444)
 
     -- nickname widget
     local function drawNicknameWidget(placeholder, clr)
@@ -2739,7 +2065,6 @@ local function drawSettingsMenu()
     local NSTheme = theme
     local NSUpdateCheck = updateCheck
     local NSDebugLog = debugLog
-    local NSAutoWork = autoWork
     local NSusers = {}
     for _, u in ipairs(users) do
         table.insert(NSusers, u)
@@ -2806,7 +2131,6 @@ local function drawSettingsMenu()
                 theme = NSTheme
                 updateCheck = NSUpdateCheck
                 debugLog = NSDebugLog
-                autoWork = NSAutoWork
                 users = NSusers
                 saveCfg()
                 break
@@ -2857,18 +2181,6 @@ local function drawSettingsMenu()
                 
                 -- Тут можно добавить действие при переключении
                 -- example: debug_log = sw_state
-            elseif x >= sw4_x and x <= sw4_x + sw4_w - 1 and y == sw4_y then
-                sw4_state = not sw4_state
-                
-                local targetPos = sw4_state and (sw4_w - 2) or 1
-                local step = (targetPos > sw4_pipePos) and 1 or -1
-                
-                repeat
-                    sw4_pipePos = sw4_pipePos + step
-                    drawSwitch(sw4_x, sw4_y, sw4_w, sw4_pipePos, sw4_state, nil, 0x777777, nil, 0x444444)
-                    buffer.drawChanges()
-                    os.sleep(0.02)
-                until sw4_pipePos == targetPos
             elseif y >= modalY + 19 and y <= modalY + 21 and x >= modalX + 55 and x <= modalX + 56+5 then
                 -- Добавляем никнейм в белый список
                 animatedButton(1, modalX + 56, modalY + 19, "ADD", nil, nil, 5, nil, nil, 0x21ff21, 0xffffff) -- 0x21ff21
@@ -2913,7 +2225,6 @@ local function drawSettingsMenu()
                 theme = sw1_state
                 updateCheck = sw2_state
                 debugLog = sw3_state
-                autoWork = sw4_state
                 saveCfg()
                 
                 switchTheme()
@@ -3251,12 +2562,7 @@ local function handleChatCommand(nick, msg, args)
             chatBox.say("§aПорог: " .. porog .. " Mb")
             chatBox.say("§aГенерация реакторов: " .. rf .. " RF/t")
             chatBox.say("§aОбщее потребление жидкости реакторами: " .. consumeSecond .. " mB/s")
-            if reactors > 0 then
-                updateRodData()
-                for i = 1, reactors do
-                    chatBox.say("§aСтержни реактора " .. i .. ": " .. (reactor_rod_summary[i] or "н/д"))
-                end
-            end
+            -- блок "стержни" удалён по запросу пользователя
             -- chatBox.say("§aСостояние реакторов:")
             -- for i = 1, reactors do
             --     if reactor_work[i] == true then
@@ -3746,15 +3052,7 @@ local function mainLoop()
     adapters_proxy = {}
     adapters_address = {}
     reactor_adapter_index = {}
-    reactor_rod_counts = {}
-    reactor_rod_summary = {}
-    reactor_rod_count = {}
-    reactor_rod_max = {}
-    reactor_rod_types = {}
     reactor_level = {}
-    reactor_rod_counts = {}
-    reactor_rod_summary = {}
-    reactor_rods_blocked = {}
     
     me_proxy = nil
     me_network = false
@@ -3796,7 +3094,6 @@ local function mainLoop()
     -- supportersText = loadSupportersFromURL("https://github.com/P1KaChU337/Reactor-Control-for-OpenComputers/raw/refs/heads/main/supporters.txt")
     -- changelog = loadChangelog("https://github.com/P1KaChU337/Reactor-Control-for-OpenComputers/raw/refs/heads/main/changelog.lua")
     updateReactorData()
-    updateRodData()
     if reactors ~= 0 then
         message("Реакторы инициализированы!", colors.msginfo, 34)
     else
@@ -3804,10 +3101,7 @@ local function mainLoop()
         message("Проверьте подключение реакторов!", colors.msgerror, 34)
     end
     if starting == true then
-        -- Проверяем стержни до запуска (после старта программы)
-        updateRodData()
         start()
-        updateReactorData()
     end
 
     if isChatBox then
@@ -3926,37 +3220,6 @@ local function mainLoop()
                 end
             end
 
-            if autoWork == true then
-                if second % 10 == 0 then
-                    updateRodData()
-                end
-
-                for i = 1, reactors do
-                    if rodsMissing(i) then
-                        if reactor_rods_blocked[i] ~= true then
-                            reactor_rods_blocked[i] = true
-                            if reactor_work[i] == true then
-                                safeCall(reactors_proxy[i], "deactivate")
-                                reactor_work[i] = false
-                            end
-                            message("Реактор " .. i .. " ОСТАНОВЛЕН! Не хватает стержней (" .. tostring(reactor_rod_count[i]) .. "/" .. tostring(reactor_rod_max[i]) .. ")", colors.msgwarn)
-                        else
-                            if reactor_work[i] == true then
-                                safeCall(reactors_proxy[i], "deactivate")
-                                reactor_work[i] = false
-                            end
-                        end
-                    elseif rodsComplete(i) then
-                        if reactor_rods_blocked[i] == true then
-                            reactor_rods_blocked[i] = false
-                            if starting == true and reactor_work[i] ~= true and reactor_aborted[i] ~= true then
-                                start(i)
-                                updateReactorData(i)
-                            end
-                        end
-                    end
-                end
-            end
             for i = 1, reactors do
                 if reactor_type[i] == "Fluid" then
                     local current_coolant = reactor_getcoolant[i]
