@@ -118,6 +118,7 @@ local chatCommands = {
     ["@help"] = true,
     ["@status"] = true,
     ["@rods"] = true,
+    ["@roddebug"] = true,
     ["@setporog"] = true,
     ["@start"] = true,
     ["@stop"] = true,
@@ -1403,6 +1404,78 @@ local function getFuelRodsSummary(proxy)
         return agg
     end
     return getFuelRodsFromStatus(proxy)
+end
+
+local function formatRodDebugValue(v)
+    local tv = type(v)
+    if tv == "string" then
+        v = v:gsub("§.", "") -- на всякий
+        if #v > 60 then
+            v = v:sub(1, 57) .. "..."
+        end
+        return '"' .. v .. '"'
+    elseif tv == "number" or tv == "boolean" then
+        return tostring(v)
+    elseif tv == "table" then
+        return "{table}"
+    else
+        return "<" .. tv .. ">"
+    end
+end
+
+local function dumpRodRecordToChat(rod, prefix)
+    prefix = prefix or "rod"
+    if not isChatBox then
+        return
+    end
+    if type(rod) ~= "table" then
+        chatBox.say("§7" .. prefix .. ": " .. tostring(rod))
+        return
+    end
+
+    local parts = {}
+    -- сначала массивная часть 1..n
+    local n = #rod
+    if n and n > 0 then
+        for i = 1, math.min(n, 20) do
+            table.insert(parts, tostring(i) .. "=" .. formatRodDebugValue(rod[i]))
+        end
+        if n > 20 then
+            table.insert(parts, "...(" .. tostring(n) .. ")")
+        end
+    end
+
+    -- затем строковые ключи (ограниченно)
+    local skeys = {}
+    for k, _ in pairs(rod) do
+        if type(k) == "string" then
+            table.insert(skeys, k)
+        end
+    end
+    table.sort(skeys)
+    for i = 1, math.min(#skeys, 20) do
+        local k = skeys[i]
+        table.insert(parts, k .. "=" .. formatRodDebugValue(rod[k]))
+    end
+    if #skeys > 20 then
+        table.insert(parts, "...(keys:" .. tostring(#skeys) .. ")")
+    end
+
+    -- чат ограничен по длине строки, режем на несколько сообщений
+    local line = "§e" .. prefix .. ": "
+    for _, p in ipairs(parts) do
+        if #line + #p + 2 > 220 then
+            chatBox.say(line)
+            line = "§e" .. prefix .. "…: "
+        end
+        if line:sub(-1) ~= " " then
+            line = line .. " "
+        end
+        line = line .. p .. ";"
+    end
+    if line ~= "" then
+        chatBox.say(line)
+    end
 end
 
 local function getReactorLevel(proxy)
@@ -2738,6 +2811,7 @@ local function handleChatCommand(nick, msg, args)
             chatBox.say("§a@userdel - удалить пользователя (пример: @userdel Ник)")
             chatBox.say("§a@status - статус системы")
             chatBox.say("§a@rods - стержни в реакторе (пример: @rods или @rods 1)")
+            chatBox.say("§7@roddebug - debug структуры стержней (пример: @roddebug 1)")
             chatBox.say("§a@setporog - установка порога жидкости (пример: @setporog 500)")
             chatBox.say("§a@start - запуск всех реакторов (или @start 1 для запуска только 1-го)")
             chatBox.say("§a@stop - остановка всех реакторов (или @stop 1 для остановки только 1-го)")
@@ -2833,6 +2907,27 @@ local function handleChatCommand(nick, msg, args)
                     end
                 end
             end
+        end
+
+    elseif msg:match("^@roddebug") then
+        if not isChatBox then
+            return
+        end
+        local num = tonumber(args:match("^(%d+)")) or 1
+        if num < 1 or num > reactors then
+            chatBox.say("§cНеверный номер реактора!")
+            return
+        end
+
+        local rods = safeCallwg(reactors_proxy[num], "getAllFuelRodsStatus", nil)
+        if type(rods) ~= "table" or #rods == 0 then
+            chatBox.say("§eРеактор " .. num .. ": §7нет getAllFuelRodsStatus")
+            return
+        end
+        chatBox.say("§e=== roddebug reactor " .. num .. " (" .. tostring(#rods) .. " записей) ===")
+        dumpRodRecordToChat(rods[1], "rod[1]")
+        if #rods >= 2 then
+            dumpRodRecordToChat(rods[2], "rod[2]")
         end
 
     elseif msg:match("^@start") then
