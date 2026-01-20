@@ -3707,27 +3707,30 @@ local function trim(s)
     return (s or ""):match("^%s*(.-)%s*$") or ""
 end
 
+local function handleChatEvent(nick, rawMsg)
+    -- очистить сообщение, привести к нижнему регистру и обрезать пробелы
+    local clean = trim(stripFormatting(tostring(rawMsg)):lower())
+
+    -- вытащить первую "словную" часть (команду) и остаток (аргументы)
+    local command = clean:match("^(%S+)")
+    local args = ""
+    if command then
+        args = clean:match("^%S+%s*(.*)$") or ""
+    end
+
+    -- если команда есть в списке — передаём в обработчик
+    if command and chatCommands[command] then
+        -- изменил сигнатуру: передаю команду и аргументы отдельно
+        handleChatCommand(nick, command, args)
+    end
+end
+
 local function chatMessageHandler()
     while not exit do
         local eventData = { event.pull(1, "chat_message") }
         if eventData[1] == "chat_message" then
             local _, _, nick, rawMsg = table.unpack(eventData)
-
-            -- очистить сообщение, привести к нижнему регистру и обрезать пробелы
-            local clean = trim(stripFormatting(tostring(rawMsg)):lower())
-
-            -- вытащить первую "словную" часть (команду) и остаток (аргументы)
-            local command = clean:match("^(%S+)")
-            local args = ""
-            if command then
-                args = clean:match("^%S+%s*(.*)$") or ""
-            end
-
-            -- если команда есть в списке — передаём в обработчик
-            if command and chatCommands[command] then
-                -- изменил сигнатуру: передаю команду и аргументы отдельно
-                handleChatCommand(nick, command, args)
-            end
+            handleChatEvent(nick, rawMsg)
         end
         os.sleep(0)
     end
@@ -4068,15 +4071,8 @@ local function mainLoop()
     end
 
     if isChatBox then
-        local okThread, threadLib = pcall(require, "thread")
-        if okThread and type(threadLib) == "table" and type(threadLib.create) == "function" and type(chatMessageHandler) == "function" then
-            local okCreate, th = pcall(threadLib.create, chatMessageHandler)
-            if okCreate and th ~= nil then
-                chatThread = th
-                message("Чат-бокс подключен! Список команд: @help", colors.msginfo)
-                chatBox.say("§2Чат-бокс подключен! §aСписок команд: @help")
-            end
-        end
+        message("Чат-бокс подключен! Список команд: @help", colors.msginfo)
+        chatBox.say("§2Чат-бокс подключен! §aСписок команд: @help")
     end
 
     if work == true then
@@ -4269,6 +4265,9 @@ local function mainLoop()
         if eventType == "touch" then
             local _, _, x, y, button, uuid = table.unpack(eventData)
             handleTouch(x, y)
+        elseif eventType == "chat_message" then
+            local _, _, nick, rawMsg = table.unpack(eventData)
+            handleChatEvent(nick, rawMsg)
         end
         os.sleep(0)
     end
