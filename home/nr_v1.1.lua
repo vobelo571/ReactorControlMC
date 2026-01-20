@@ -1230,10 +1230,11 @@ local function addFuelRodAgg(agg, key, addCount, stack)
     end
     local e = agg[key]
     if not e then
-        e = {count = 0, minP = nil, maxP = nil, sumP = 0, pN = 0}
+        e = {count = 0, slots = 0, minP = nil, maxP = nil, sumP = 0, pN = 0}
         agg[key] = e
     end
     e.count = e.count + addCount
+    e.slots = e.slots + 1
 
     -- если предмет отдаёт durability через damage/maxDamage — посчитаем сводку
     if type(stack) == "table" then
@@ -1249,13 +1250,14 @@ local function addFuelRodAgg(agg, key, addCount, stack)
     end
 end
 
-local function getFuelRodsFromInventory(proxy)
-    local size, side = getInventorySize(proxy)
-    if not size then
-        return nil
+local function getInventorySizeOnSide(proxy, side)
+    if side == nil then
+        return safeCall(proxy, "getInventorySize", nil)
     end
+    return safeCall(proxy, "getInventorySize", nil, side)
+end
 
-    local agg = {}
+local function scanInventorySideForRods(proxy, side, size, agg)
     local stacks = getAllStacks(proxy, side)
     if stacks then
         for slot = 1, size do
@@ -1264,16 +1266,42 @@ local function getFuelRodsFromInventory(proxy)
                 addFuelRodAgg(agg, tostring(stack.name or stack.label or "unknown"), tonumber(stack.size) or 1, stack)
             end
         end
-        return agg
+        return
     end
-
     for slot = 1, size do
         local stack = getStackInSlot(proxy, side, slot)
         if isFuelRodStack(stack) then
             addFuelRodAgg(agg, tostring(stack.name or stack.label or "unknown"), tonumber(stack.size) or 1, stack)
         end
     end
-    return agg
+end
+
+local function getFuelRodsFromInventory(proxy)
+    -- Важно: некоторые компоненты имеют несколько "инвентарей" на разных сторонах.
+    -- Чтобы не недосчитывать — сканируем все стороны (и вариант без side).
+    local agg = {}
+    local any = false
+
+    -- сначала вариант без side (если компонент его поддерживает)
+    local sizeNil = getInventorySizeOnSide(proxy, nil)
+    if type(sizeNil) == "number" and sizeNil > 0 then
+        scanInventorySideForRods(proxy, nil, sizeNil, agg)
+        any = true
+    end
+
+    -- затем все стороны
+    for side = 0, 5 do
+        local size = getInventorySizeOnSide(proxy, side)
+        if type(size) == "number" and size > 0 then
+            scanInventorySideForRods(proxy, side, size, agg)
+            any = true
+        end
+    end
+
+    if any then
+        return agg
+    end
+    return nil
 end
 
 local function extractFirstStringWithColon(t)
@@ -2729,6 +2757,9 @@ local function handleChatCommand(nick, msg, args)
                 for _, k in ipairs(keys) do
                     local e = agg[k]
                     local line = "§a" .. k .. ": §e" .. tostring(e.count or 0)
+                    if e.slots and e.slots > 0 then
+                        line = line .. " §7(слотов: " .. tostring(e.slots) .. ")"
+                    end
                     if e.pN and e.pN > 0 then
                         local avg = (e.sumP / e.pN) * 100
                         local mn = (e.minP or 0) * 100
