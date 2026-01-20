@@ -100,6 +100,7 @@ local reactor_ConsumptionPerSecond = {}
 local reactor_level = {}
 local reactor_rods_filled = {}
 local reactor_rods_total = {}
+local reactor_rods_capacity = {}
 local reactor_rods_type = {}
 local reactor_rods_cache_at = {}
 local adapters_proxy = {}
@@ -893,6 +894,16 @@ local function refreshReactorRodsInfo(i)
         end
     end
 
+    -- Кэш ёмкости: если таблицы приходят только для занятых ячеек,
+    -- сохраняем максимум наблюдавшихся стержневых ячеек.
+    local cap = tonumber(reactor_rods_capacity[i]) or 0
+    if filledCells > cap then
+        cap = filledCells
+        reactor_rods_capacity[i] = cap
+    end
+    if cap > totalCells then
+        totalCells = cap
+    end
     if totalCells <= 0 then
         -- fallback: если поиндексный API временно недоступен
         totalCells = getRodTotalSlotsByLevel(reactor_level[i]) or 0
@@ -4002,6 +4013,7 @@ local function mainLoop()
     reactor_level = {}
     reactor_rods_filled = {}
     reactor_rods_total = {}
+    reactor_rods_capacity = {}
     reactor_rods_type = {}
     reactor_rods_cache_at = {}
     
