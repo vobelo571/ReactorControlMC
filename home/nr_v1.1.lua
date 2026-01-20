@@ -895,18 +895,22 @@ local function refreshReactorRodsInfo(i)
     end
 
     -- В твоей реализации getSelectStatusRod возвращает таблицы только для занятых ячеек,
-    -- поэтому totalCells часто == filledCells. Чтобы учитывать пустые "стержневые" ячейки,
-    -- ведём кэш ёмкости (максимум наблюдавшихся занятых ячеек).
+    -- поэтому totalCells часто == filledCells. Чтобы учитывать пустые "стержневые" ячейки
+    -- (и не считать обшивки), ведём кэш ёмкости: максимум наблюдавшихся занятых ячеек.
     local cap = tonumber(reactor_rods_capacity[i]) or 0
-    local observed = math.max(tonumber(totalCells) or 0, tonumber(filledCells) or 0)
+    local observed = tonumber(filledCells) or 0
     if observed > cap then
         cap = observed
         reactor_rods_capacity[i] = cap
     end
 
     if cap <= 0 then
-        -- fallback: если поиндексный API временно недоступен
-        cap = getRodTotalSlotsByLevel(reactor_level[i]) or 0
+        -- fallback: если поиндексный API недоступен или ещё ни разу не было стержней
+        -- показываем "как есть" (занято/занято), пока не накопим статистику по ёмкости
+        cap = observed
+        if cap <= 0 then
+            cap = getRodTotalSlotsByLevel(reactor_level[i]) or 0
+        end
         reactor_rods_capacity[i] = cap
     end
 
