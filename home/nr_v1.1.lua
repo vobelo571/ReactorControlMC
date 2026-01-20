@@ -13,11 +13,6 @@ local unicode = require("unicode")
 local bit = require("bit32")
 -- ----------------------------------------------------------------------------------------------------
 
-local REACTOR_COMPONENT = "htc_reactors"
-local ADAPTER_COMPONENT = "adapter"
-local ME_INTERFACE_COMPONENT = "me_interface"
-local ME_CONTROLLER_COMPONENT = "me_controller"
-
 buffer.setResolution(160, 50)
 buffer.clear(0x000000)
 
@@ -53,14 +48,6 @@ if not fs.exists(configPath) then
         file:write("updateCheck = true -- (false не проверять на наличие обновлений, true проверять обновления)\n\n")
         file:write("debugLog = false\n\n")
         file:write("isFirstStart = true\n\n")
-        file:write("-- ME сеть: сопоставление типов стержней и лимиты заказа\n")
-        file:write("me_rod_map = {\n")
-        file:write("  -- [\"htc_reactors:quad_uranium_fuel_rod\"] = \"htc_reactors:quad_uranium_fuel_rod\",\n")
-        file:write("}\n")
-        file:write("me_min_order = {}\n")
-        file:write("me_max_order = {}\n")
-        file:write("me_default_min_order = 0\n")
-        file:write("me_default_max_order = 0\n\n")
         file:write("-- После внесение изменений сохраните данные (Ctrl+S) и выйдите из редактора (Ctrl+W)\n")
         file:write("-- Если в будущем захотите поменять данные то пропишите \"cd data\" затем \"edit config.lua\"\n")
         file:close()
@@ -76,12 +63,6 @@ if not ok then
     io.stderr:write("Ошибка загрузки конфига: " .. tostring(err) .. "\n")
     return
 end
-
-if type(me_rod_map) ~= "table" then me_rod_map = {} end
-if type(me_min_order) ~= "table" then me_min_order = {} end
-if type(me_max_order) ~= "table" then me_max_order = {} end
-me_default_min_order = tonumber(me_default_min_order) or 0
-me_default_max_order = tonumber(me_default_max_order) or 0
 
 local any_reactor_on = false
 local any_reactor_off = false
@@ -122,25 +103,12 @@ local reactor_rod_count = {}
 local reactor_rod_max = {}
 local reactor_rod_types = {}
 local reactor_level = {}
-local reactor_rod_data = {}
-local reactor_state = {}
-local reactor_depletion_initial = {}
-local reactor_order_pending = {}
-local reactor_order_last = {}
-local me_orders = {}
-local perf_samples = 0
-local perf_avg_loop = 0
-local perf_max_loop = 0
-
-local ME_ORDER_DEBOUNCE = 30
 local adapters_proxy = {}
 local adapters_address = {}
 local reactor_adapter_index = {}
 local last_me_address = nil
 local me_network = false
 local me_proxy = nil
-local me_component_type = nil
-local me_last_error = nil
 local lastValidFluid = 0
 local maxThreshold = 10^12
 local reason = nil
@@ -154,7 +122,6 @@ local chatThread = nil
 local chatCommands = {
     ["@help"] = true,
     ["@status"] = true,
-    ["@metest"] = true,
     ["@setporog"] = true,
     ["@start"] = true,
     ["@stop"] = true,
@@ -223,11 +190,6 @@ local rod_types = {
     ["htc_reactors:quad_californium_fuel_rod"] = "Калифорний x4",
     ["htc_reactors:quad_ksirviz_fuel_rod"] = "Ксирд.-Визамиум x4",
 }
-
-local rod_label_to_id = {}
-for id, label in pairs(rod_types) do
-    rod_label_to_id[label] = id
-end
 
 local UNKNOWN_ROD_ID = "__unknown_rod__"
 
@@ -431,25 +393,6 @@ local brail_verticalbar = {
 }
 
 -- ----------------------------------------------------------------------------------------------------
-local function serializeKeyValueTable(tbl)
-    if type(tbl) ~= "table" then
-        return "{}"
-    end
-    local parts = {}
-    for k, v in pairs(tbl) do
-        local key = string.format("[%q]", tostring(k))
-        if type(v) == "number" then
-            table.insert(parts, key .. "=" .. tostring(v))
-        else
-            table.insert(parts, key .. "=" .. string.format("%q", tostring(v)))
-        end
-    end
-    if #parts == 0 then
-        return "{}"
-    end
-    return "{ " .. table.concat(parts, ", ") .. " }"
-end
-
 local function saveCfg(param)
     local file = io.open(configPath, "w")
     if not file then
@@ -487,11 +430,6 @@ local function saveCfg(param)
     file:write(string.format("updateCheck = %s -- (false не проверять на наличие обновлений, true проверять обновления)\n\n", tostring(updateCheck)))
     file:write(string.format("debugLog = %s\n\n", tostring(debugLog)))
     file:write(string.format("isFirstStart = %s\n\n", tostring(isFirstStart)))
-    file:write("me_rod_map = " .. serializeKeyValueTable(me_rod_map) .. "\n")
-    file:write("me_min_order = " .. serializeKeyValueTable(me_min_order) .. "\n")
-    file:write("me_max_order = " .. serializeKeyValueTable(me_max_order) .. "\n")
-    file:write(string.format("me_default_min_order = %d\n", math.max(0, tonumber(me_default_min_order) or 0)))
-    file:write(string.format("me_default_max_order = %d\n\n", math.max(0, tonumber(me_default_max_order) or 0)))
     file:write("-- После внесение изменений сохраните данные (Ctrl+S) и выйдите из редактора (Ctrl+W)\n")
     file:write("-- Для запуска основой программы перейдите в домашнюю директорию \"cd ..\", и напишите \"main.lua\"\n")
     
@@ -539,7 +477,7 @@ local function initReactors()
     reactor_address = {}
     reactors_proxy = {}
 
-    for address, ctype in component.list(REACTOR_COMPONENT) do
+    for address, ctype in component.list("htc_reactors") do
         reactors = reactors + 1
         reactor_address[reactors] = address
         reactors_proxy[reactors] = component.proxy(address)
@@ -568,7 +506,7 @@ local function initAdapters()
     adapters_proxy = {}
     reactor_adapter_index = {}
     local idx = 0
-    for address in component.list(ADAPTER_COMPONENT) do
+    for address in component.list("adapter") do
         idx = idx + 1
         adapters_address[idx] = address
         adapters_proxy[idx] = component.proxy(address)
@@ -581,26 +519,22 @@ end
 local function initMe()
     me_network = false
     me_proxy = nil
-    me_component_type = nil
-    me_last_error = nil
     current_me_address = nil
     offFluid = false
     reason = nil
 
-    if component.isAvailable(ME_INTERFACE_COMPONENT) then
-        for address in component.list(ME_INTERFACE_COMPONENT) do
+    if component.isAvailable("me_interface") then
+        for address in component.list("me_interface") do
             current_me_address = address
             me_proxy = component.proxy(address)
             me_network = me_proxy ~= nil
-            me_component_type = ME_INTERFACE_COMPONENT
             break
         end
-    elseif component.isAvailable(ME_CONTROLLER_COMPONENT) then
-        for address in component.list(ME_CONTROLLER_COMPONENT) do
+    elseif component.isAvailable("me_controller") then
+        for address in component.list("me_controller") do
             current_me_address = address
             me_proxy = component.proxy(address)
             me_network = me_proxy ~= nil
-            me_component_type = ME_CONTROLLER_COMPONENT
             break
         end
     end
@@ -921,18 +855,13 @@ local function drawWidgets()
             else
                 reactor_depletionTime[i] = 0
             end
-            updateRodSnapshot(i)
-            updateReactorState(i)
 
             buffer.drawText(x + 6,  y + 1,  colors.textclr, "Реактор #" .. i)
             buffer.drawText(x + 4,  y + 2,  colors.textclr, "Нагрев: " .. (temperature[i] or "-") .. "°C")
             buffer.drawText(x + 4,  y + 3,  colors.textclr, formatRFwidgets(reactor_rf[i]))
             buffer.drawText(x + 4,  y + 4,  colors.textclr, "Тип: " .. (reactor_type[i] or "-"))
             buffer.drawText(x + 4,  y + 5,  colors.textclr, "Запущен: " .. (reactor_work[i] and "Да" or "Нет"))
-            local depletionPercent = math.floor(((reactor_state[i] and reactor_state[i].depletion_level) or 0) * 100 + 0.5)
-            local depletionLabel = (reactor_state[i] and reactor_state[i].fully_depleted) and "100%" or (tostring(depletionPercent) .. "%")
-            local depletionText = "Распад: " .. secondsToHMS(reactor_depletionTime[i] or 0) .. " " .. depletionLabel
-            buffer.drawText(x + 4,  y + 6,  colors.textclr, shortenText(depletionText, 18))
+            buffer.drawText(x + 4,  y + 6,  colors.textclr, "Распад: " .. secondsToHMS(reactor_depletionTime[i] or 0))
             buffer.drawText(x + 4,  y + 7,  colors.textclr, shortenText("Стержни: " .. (reactor_rod_types[i] or "н/д"), 18))
             local countText = (reactor_rod_count[i] ~= nil and reactor_rod_max[i] ~= nil)
                 and (tostring(reactor_rod_count[i]) .. "/" .. tostring(reactor_rod_max[i]))
@@ -1254,266 +1183,6 @@ local function safeCall(proxy, method, default, ...)
         end
     end
     return default
-end
-
-local function meGetItems()
-    if not me_proxy then
-        return {}
-    end
-    local items = safeCall(me_proxy, "getItemsInNetwork", nil)
-    if type(items) == "table" then
-        return items
-    end
-    return {}
-end
-
-local function meGetCraftables()
-    if not me_proxy then
-        return {}
-    end
-    local craftables = safeCall(me_proxy, "getCraftables", nil)
-    if type(craftables) == "table" then
-        return craftables
-    end
-    return {}
-end
-
-local function meGetCraftableId(craftable)
-    if type(craftable) ~= "table" then
-        return nil
-    end
-    if type(craftable.getItemStack) == "function" then
-        local ok, stack = pcall(craftable.getItemStack, craftable)
-        if ok and type(stack) == "table" then
-            return stack.name or stack.id or stack.label
-        end
-    end
-    return craftable.name or craftable.id or craftable.label
-end
-
-local function meFindCraftable(id)
-    if type(id) ~= "string" or id == "" then
-        return nil
-    end
-    for _, craftable in ipairs(meGetCraftables()) do
-        local craftId = meGetCraftableId(craftable)
-        if craftId == id then
-            return craftable
-        end
-    end
-    return nil
-end
-
-local function meRequestCrafting(id, count)
-    local craftable = meFindCraftable(id)
-    if not craftable then
-        return nil, "Шаблон не найден"
-    end
-    count = tonumber(count) or 1
-
-    if type(craftable.requestCrafting) == "function" then
-        local ok, job = pcall(craftable.requestCrafting, craftable, count)
-        if ok then
-            return job, nil
-        end
-    end
-    if type(craftable.request) == "function" then
-        local ok, job = pcall(craftable.request, craftable, count)
-        if ok then
-            return job, nil
-        end
-    end
-    if type(me_proxy.requestCrafting) == "function" then
-        local ok, job = pcall(me_proxy.requestCrafting, me_proxy, {name = id, count = count})
-        if ok then
-            return job, nil
-        end
-    end
-    return nil, "Ошибка запроса"
-end
-
-local function meGetJobState(job)
-    if not job then
-        return nil, nil
-    end
-    local done = nil
-    local canceled = nil
-    if type(job.isDone) == "function" then
-        local ok, result = pcall(job.isDone, job)
-        if ok then done = result end
-    end
-    if type(job.isCanceled) == "function" then
-        local ok, result = pcall(job.isCanceled, job)
-        if ok then canceled = result end
-    end
-    return done, canceled
-end
-
-local function updatePerfStats(dt)
-    if type(dt) ~= "number" then
-        return
-    end
-    perf_samples = perf_samples + 1
-    perf_avg_loop = perf_avg_loop + (dt - perf_avg_loop) / perf_samples
-    if dt > perf_max_loop then
-        perf_max_loop = dt
-    end
-end
-
-local function getPreferredRodId(i)
-    local counts = reactor_rod_counts[i]
-    if type(counts) == "table" then
-        local bestId = nil
-        local bestCount = 0
-        for id, count in pairs(counts) do
-            local num = tonumber(count) or 0
-            if id ~= UNKNOWN_ROD_ID and rod_types[id] and num > bestCount then
-                bestId = id
-                bestCount = num
-            end
-        end
-        if bestId then
-            return bestId
-        end
-    end
-    local label = reactor_rod_types[i]
-    if label and rod_label_to_id[label] then
-        return rod_label_to_id[label]
-    end
-    return nil
-end
-
-local function meEnqueueOrder(rodId, count, reactorIndex)
-    if not me_network or not me_proxy then
-        me_last_error = "МЭ не подключена"
-        return nil
-    end
-    local job, err = meRequestCrafting(rodId, count)
-    if not job then
-        me_last_error = err or "Ошибка запроса"
-        return nil
-    end
-    local order = {
-        id = rodId,
-        count = count,
-        job = job,
-        reactor = reactorIndex,
-        created_at = computer.uptime(),
-    }
-    table.insert(me_orders, order)
-    me_last_error = nil
-    return order
-end
-
-local function mePollOrders()
-    for idx = #me_orders, 1, -1 do
-        local order = me_orders[idx]
-        local done, canceled = meGetJobState(order.job)
-        if done or canceled then
-            table.remove(me_orders, idx)
-            if order.reactor then
-                reactor_order_pending[order.reactor] = nil
-            end
-            if canceled then
-                me_last_error = "Заказ отменён"
-            end
-        end
-    end
-end
-
-local function maybeOrderReactorRods(i)
-    if not me_network or not me_proxy then
-        me_last_error = "МЭ не подключена"
-        return
-    end
-    local state = reactor_state[i]
-    if not state or not state.fully_depleted then
-        return
-    end
-    if reactor_order_pending[i] then
-        return
-    end
-    local now = computer.uptime()
-    if reactor_order_last[i] and (now - reactor_order_last[i]) < ME_ORDER_DEBOUNCE then
-        return
-    end
-    local rodId = getPreferredRodId(i)
-    local count = state.rod_max or reactor_rod_max[i] or 0
-    if not rodId or count <= 0 then
-        me_last_error = "Неизв. стержни"
-        return
-    end
-    local meId = me_rod_map[rodId] or rodId
-    local minCount = me_min_order[rodId] or me_default_min_order or 0
-    local maxCount = me_max_order[rodId] or me_default_max_order or 0
-    if count < minCount then
-        count = minCount
-    end
-    if maxCount > 0 and count > maxCount then
-        count = maxCount
-    end
-    if count <= 0 then
-        return
-    end
-    local order = meEnqueueOrder(meId, count, i)
-    if order then
-        reactor_order_pending[i] = order
-        reactor_order_last[i] = now
-    end
-end
-
-local function safeMeTick()
-    local ok = pcall(function()
-        mePollOrders()
-        for i = 1, reactors do
-            maybeOrderReactorRods(i)
-        end
-    end)
-    if not ok then
-        me_last_error = "ME: ошибка"
-    end
-end
-
-local function runMeTestScenarios()
-    message("ME тест: запуск диагностики...", colors.textclr, 34)
-    if not me_network or not me_proxy then
-        message("ME тест: МЭ не подключена", colors.msgerror, 34)
-        return
-    end
-
-    local rodIds = {}
-    for i = 1, reactors do
-        local rodId = getPreferredRodId(i)
-        if rodId then
-            rodIds[rodId] = true
-        end
-    end
-
-    local missing = 0
-    local checked = 0
-    for rodId, _ in pairs(rodIds) do
-        local meId = me_rod_map[rodId] or rodId
-        checked = checked + 1
-        if not meFindCraftable(meId) then
-            missing = missing + 1
-            message("ME тест: нет шаблона для " .. tostring(meId), colors.msgwarn, 34)
-        end
-        local minCount = me_min_order[rodId] or me_default_min_order or 0
-        local maxCount = me_max_order[rodId] or me_default_max_order or 0
-        if maxCount > 0 and minCount > maxCount then
-            message("ME тест: min>max для " .. tostring(rodId), colors.msgwarn, 34)
-        end
-    end
-
-    if checked == 0 then
-        message("ME тест: нет данных по стержням", colors.msgwarn, 34)
-    elseif missing == 0 then
-        message("ME тест: шаблоны OK (" .. checked .. ")", colors.msginfo, 34)
-    end
-
-    local avgMs = math.floor((perf_avg_loop or 0) * 1000 + 0.5)
-    local maxMs = math.floor((perf_max_loop or 0) * 1000 + 0.5)
-    message("ME тест: цикл " .. avgMs .. "ms avg / " .. maxMs .. "ms max", colors.textclr, 34)
 end
 
 local function extractRodId(rod)
@@ -1867,56 +1536,6 @@ local function getReactorLevel(proxy)
     return 1
 end
 
-local function updateRodSnapshot(i)
-    reactor_rod_data[i] = {
-        depletion_time = reactor_depletionTime[i] or 0,
-        rod_counts = reactor_rod_counts[i],
-        rod_summary = reactor_rod_summary[i],
-        rod_types = reactor_rod_types[i],
-        rod_count = reactor_rod_count[i],
-        rod_max = reactor_rod_max[i],
-    }
-end
-
-local function updateReactorState(i)
-    local state = reactor_state[i] or {}
-    local currentTime = tonumber(reactor_depletionTime[i]) or 0
-    local rodType = reactor_rod_types[i] or "н/д"
-    local rodCount = reactor_rod_count[i]
-
-    local initial = reactor_depletion_initial[i] or 0
-    local shouldReset = false
-    if currentTime > initial then
-        shouldReset = true
-    end
-    if state.rod_type and state.rod_type ~= rodType then
-        shouldReset = true
-    end
-    if rodCount ~= nil and state.rod_count ~= nil and rodCount > state.rod_count then
-        shouldReset = true
-    end
-    if shouldReset then
-        initial = currentTime
-        reactor_depletion_initial[i] = initial
-    end
-
-    local level = 0
-    if initial > 0 then
-        level = 1 - (currentTime / initial)
-        if level < 0 then level = 0 end
-        if level > 1 then level = 1 end
-    end
-
-    local fullyDepleted = (currentTime <= 0) and ((rodCount or 0) == 0)
-    state.rod_type = rodType
-    state.depletion_time = currentTime
-    state.depletion_level = level
-    state.fully_depleted = fullyDepleted
-    state.rod_count = rodCount
-    state.rod_max = reactor_rod_max[i]
-    reactor_state[i] = state
-end
-
 local function updateRodData(num)
     for i = num or 1, num or reactors do
         local proxy = reactors_proxy[i]
@@ -2015,8 +1634,6 @@ local function updateRodData(num)
             reactor_rod_count[i] = totalCount
             reactor_rod_max[i] = maxCount
         end
-        updateRodSnapshot(i)
-        updateReactorState(i)
     end
 end
 
@@ -2383,12 +2000,6 @@ local function drawDynamic()
         buffer.drawText(123 + i, 4, colors.bg2, brailleChar(brail_console[2]))
     end
     buffer.drawText(124, 3, colors.textclr, "Информационное окно отладки:")
-    local queueCount = (type(me_orders) == "table") and #me_orders or 0
-    local meStatus = "МЭ: " .. (me_network and "вкл" or "выкл") .. " | Очередь: " .. tostring(queueCount)
-    if me_last_error then
-        meStatus = "МЭ: " .. (me_network and "вкл" or "выкл") .. " | Ошибка: " .. tostring(me_last_error)
-    end
-    buffer.drawText(124, 4, colors.textclr, shortenText(meStatus, 34))
     drawStatus()
 
     -- -----------------------------------------------------------
@@ -2569,7 +2180,7 @@ local function reactorsChanged()
     local currentCount = 0
     local current = {}
 
-    for address in component.list(REACTOR_COMPONENT) do
+    for address in component.list("htc_reactors") do
         current[address] = true
         currentCount = currentCount + 1
     end
@@ -3337,7 +2948,6 @@ local function handleChatCommand(nick, msg, args)
             chatBox.say("§e=== Команды Reactor Control ===")
             chatBox.say("§a@help - список команд")
             chatBox.say("§a@info - информация о системе")
-            chatBox.say("§a@metest - диагностика ME (шаблоны/производительность)")
             chatBox.say("§a@useradd - добавить пользователя (пример: @useradd Ник)") -- Сделай
             chatBox.say("§a@userdel - удалить пользователя (пример: @userdel Ник)")
             chatBox.say("§a@status - статус системы")
@@ -3393,9 +3003,6 @@ local function handleChatCommand(nick, msg, args)
             --     end
             -- end
         end
-
-    elseif msg == "@metest" then
-        runMeTestScenarios()
 
     elseif msg:match("^@start") then
         local num = tonumber(args:match("^(%d+)"))
@@ -3875,12 +3482,6 @@ local function mainLoop()
     reactor_rod_max = {}
     reactor_rod_types = {}
     reactor_level = {}
-    reactor_rod_data = {}
-    reactor_state = {}
-    reactor_depletion_initial = {}
-    reactor_order_pending = {}
-    reactor_order_last = {}
-    me_orders = {}
     reactor_rod_counts = {}
     reactor_rod_summary = {}
     
@@ -3974,7 +3575,6 @@ local function mainLoop()
     depletionTime = depletionTime or 0
     reactors = tonumber(reactors) or 0
     while true do
-        local loopStart = computer.uptime()
         if exit == true then
             return
         end
@@ -4081,7 +3681,6 @@ local function mainLoop()
                 consumeSecond = getTotalFluidConsumption()
                 drawStatus()
                 drawFluxRFinfo()
-                safeMeTick()
                 if flux_network == true and flux_checked == false then
                     clearRightWidgets()
                     drawDynamic()
@@ -4132,7 +3731,6 @@ local function mainLoop()
             local _, _, x, y, button, uuid = table.unpack(eventData)
             handleTouch(x, y)
         end
-        updatePerfStats(computer.uptime() - loopStart)
         os.sleep(0)
     end
 end
