@@ -826,11 +826,6 @@ local function getRodTotalSlotsByLevel(level)
     return nil
 end
 
-local function isIgnoredRodItemId(itemId)
-    itemId = tostring(itemId or ""):lower()
-    return itemId == "htc_reactors:containments_reactor_casing"
-end
-
 -- forward declaration (UI uses it before definition later in file)
 local getFuelRodsFromSelectStatus
 
@@ -1690,9 +1685,6 @@ getFuelRodsFromSelectStatus = function(proxy)
             if itemId == "" or itemId == "nil" then
                 itemId = tostring(extractFirstStringWithColon(rod) or "unknown")
             end
-            if isIgnoredRodItemId(itemId) then
-                goto continue_select
-            end
 
             -- Если мод отдаёт stack-size (1..6), обычно это будет count/size/amount.
             local cnt = extractCountFromKv(kv)
@@ -1712,7 +1704,6 @@ getFuelRodsFromSelectStatus = function(proxy)
                 addFuelRodAggPercent(agg, itemId, cnt, pct)
                 any = true
             end
-            ::continue_select::
         end
     end
 
@@ -1742,9 +1733,6 @@ local function getFuelRodsFromStatus(proxy)
             if itemId == "" or itemId == "nil" then
                 itemId = tostring(extractFirstStringWithColon(rod) or "unknown")
             end
-            if isIgnoredRodItemId(itemId) then
-                goto continue_status
-            end
 
             -- В твоём debug нет поля с количеством "1..6", только fuel/maxFuel.
             -- Поэтому точное число предметов в слоте через adapter получить нельзя — считаем слоты.
@@ -1756,7 +1744,6 @@ local function getFuelRodsFromStatus(proxy)
             end
 
             addFuelRodAggPercent(agg, itemId, 1, pct)
-            ::continue_status::
         else
             addFuelRodAgg(agg, "unknown", 1, nil)
         end
