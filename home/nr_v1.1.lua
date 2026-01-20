@@ -98,6 +98,10 @@ local reactor_maxcoolant = {}
 local reactor_depletionTime = {}
 local reactor_ConsumptionPerSecond = {}
 local reactor_level = {}
+local reactor_rods_filled = {}
+local reactor_rods_total = {}
+local reactor_rods_type = {}
+local reactor_rods_cache_at = {}
 local adapters_proxy = {}
 local adapters_address = {}
 local reactor_adapter_index = {}
@@ -811,6 +815,79 @@ local function formatRFwidgets(value)
     return "Ген: " .. str .. " " .. suffixes[i] .. "RF/t"
 end
 
+local function getRodTotalSlotsByLevel(level)
+    -- Из наблюдений: уровень 6 = 20 ячеек.
+    -- Для остальных уровней точное количество API не отдаёт.
+    if tonumber(level) == 6 then
+        return 20
+    end
+    return nil
+end
+
+local function formatFuelTypeName(itemId)
+    itemId = tostring(itemId or "")
+    local lower = itemId:lower()
+    if lower:find("mox", 1, true) then
+        return "MOX"
+    end
+    if lower:find("uranium", 1, true) then
+        return "Уран"
+    end
+    if lower:find("thorium", 1, true) then
+        return "Торий"
+    end
+    if lower:find("plutonium", 1, true) then
+        return "Плутоний"
+    end
+    if lower:find("americium", 1, true) then
+        return "Америций"
+    end
+    if lower:find("neptun", 1, true) then
+        return "Нептуний"
+    end
+    local short = itemId:match(":(.+)$") or itemId
+    short = short:gsub("_", " ")
+    return short
+end
+
+local function refreshReactorRodsInfo(i)
+    if not reactors_proxy[i] then
+        reactor_rods_filled[i] = 0
+        reactor_rods_total[i] = getRodTotalSlotsByLevel(reactor_level[i])
+        reactor_rods_type[i] = "-"
+        reactor_rods_cache_at[i] = computer.uptime()
+        return
+    end
+
+    local agg = getFuelRodsFromSelectStatus(reactors_proxy[i])
+    local filled = 0
+    local mainType = nil
+    local mainSlots = 0
+    if agg and next(agg) ~= nil then
+        for k, e in pairs(agg) do
+            local slots = tonumber(e.slots) or tonumber(e.count) or 0
+            filled = filled + slots
+            if slots > mainSlots then
+                mainSlots = slots
+                mainType = k
+            end
+        end
+    end
+
+    reactor_rods_filled[i] = filled
+    reactor_rods_total[i] = getRodTotalSlotsByLevel(reactor_level[i])
+    reactor_rods_type[i] = mainType and formatFuelTypeName(mainType) or "-"
+    reactor_rods_cache_at[i] = computer.uptime()
+end
+
+local function ensureReactorRodsInfoFresh(i)
+    local now = computer.uptime()
+    local last = reactor_rods_cache_at[i]
+    if type(last) ~= "number" or (now - last) >= 5 then
+        refreshReactorRodsInfo(i)
+    end
+end
+
 
 local function drawWidgets()
     if reactors <= 0 then
@@ -857,11 +934,19 @@ local function drawWidgets()
                 reactor_depletionTime[i] = 0
             end
 
+            ensureReactorRodsInfoFresh(i)
+
             buffer.drawText(x + 6,  y + 1,  colors.textclr, "Реактор #" .. i)
             buffer.drawText(x + 4,  y + 2,  colors.textclr, "Нагрев: " .. (temperature[i] or "-") .. "°C")
             buffer.drawText(x + 4,  y + 3,  colors.textclr, formatRFwidgets(reactor_rf[i]))
-            buffer.drawText(x + 4,  y + 4,  colors.textclr, "Тип: " .. (reactor_type[i] or "-"))
-            buffer.drawText(x + 4,  y + 5,  colors.textclr, "Запущен: " .. (reactor_work[i] and "Да" or "Нет"))
+            local filled = tonumber(reactor_rods_filled[i]) or 0
+            local total = reactor_rods_total[i]
+            local rodsLine = "Стержни: " .. tostring(filled)
+            if type(total) == "number" and total > 0 then
+                rodsLine = rodsLine .. "/" .. tostring(total)
+            end
+            buffer.drawText(x + 4,  y + 4,  colors.textclr, rodsLine)
+            buffer.drawText(x + 4,  y + 5,  colors.textclr, "Топливо: " .. tostring(reactor_rods_type[i] or "-"))
             buffer.drawText(x + 4,  y + 6,  colors.textclr, "Распад: " .. secondsToHMS(reactor_depletionTime[i] or 0))
             animatedButton(1, x + 6, y + 9, (reactor_work[i] and "Отключить" or "Включить"), nil, nil, 10, nil, nil, (reactor_work[i] and 0xfd3232 or 0x2beb1a))
             if reactor_type[i] == "Fluid" then
@@ -3285,9 +3370,17 @@ local function handleChatCommand(nick, msg, args)
                 local shown = 0
                 for _, k in ipairs(keys) do
                     local e = agg[k]
-                    local line = "§a" .. k .. ": §e" .. tostring(e.count or 0)
-                    if e.slots and e.slots > 0 then
-                        line = line .. " §7(слотов: " .. tostring(e.slots) .. ")"
+                    local c = tonumber(e.count) or 0
+                    local s = tonumber(e.slots) or 0
+                    local line
+                    -- если count совпадает со slots (как в htc_reactors status API) — показываем как "ячеек"
+                    if s > 0 and c == s then
+                        line = "§a" .. k .. ": §e" .. tostring(s) .. " §7(ячеек)"
+                    else
+                        line = "§a" .. k .. ": §e" .. tostring(c)
+                        if s > 0 then
+                            line = line .. " §7(слотов: " .. tostring(s) .. ")"
+                        end
                     end
                     if e.pN and e.pN > 0 then
                         local avg = (e.sumP / e.pN) * 100
@@ -3862,6 +3955,10 @@ local function mainLoop()
     adapters_address = {}
     reactor_adapter_index = {}
     reactor_level = {}
+    reactor_rods_filled = {}
+    reactor_rods_total = {}
+    reactor_rods_type = {}
+    reactor_rods_cache_at = {}
     
     me_proxy = nil
     me_network = false
