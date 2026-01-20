@@ -208,33 +208,11 @@ local rod_order = {
 local rod_aliases = {
     ["quad_uranium_fuel_rod"] = "htc_reactors:quad_uranium_fuel_rod",
     ["sixteen_uraium_fuel_rod"] = "htc_reactors:sixteen_uraium_fuel_rod",
-    ["sixteen_uranium_fuel_rod"] = "htc_reactors:sixteen_uraium_fuel_rod",
-    ["sixten_uranium_fuel_rod"] = "htc_reactors:sixteen_uraium_fuel_rod",
     ["quad_mox_fuel_rod"] = "htc_reactors:quad_mox_fuel_rod",
     ["sixteen_mox_fuel_rod"] = "htc_reactors:sixteen_mox_fuel_rod",
     ["quad_californium_fuel_rod"] = "htc_reactors:quad_californium_fuel_rod",
     ["quad_ksirviz_fuel_rod"] = "htc_reactors:quad_ksirviz_fuel_rod",
 }
-
-local function canonicalizeRodId(id)
-    if type(id) ~= "string" then
-        return nil
-    end
-    local lower = id:lower()
-    if lower:find("containment_reactor_casing") or lower:find("containment_reacor_casing") then
-        return nil
-    end
-    if not lower:find("fuel_rod") then
-        return nil
-    end
-    if lower:find("^htc_reactor:") then
-        return "htc_reactors:" .. id:sub(#"htc_reactor:" + 1)
-    end
-    if lower:find("^htc_reactors:") then
-        return id
-    end
-    return nil
-end
 
 local function brailleChar(dots)
     return unicode.char(
@@ -1281,22 +1259,16 @@ local function extractRodId(rod)
             return nil
         end
         if value:find(":") then
-            return canonicalizeRodId(value)
+            return value
         end
         local key = value:lower()
         key = key:gsub("%s+", "_")
         key = key:gsub("[-]", "_")
-        if key:find("casing") or key:find("обшив") or key:find("обшивк") then
-            return nil
-        end
         if rod_aliases[key] then
             return rod_aliases[key]
         end
-        if not (key:find("fuel") or key:find("топлив") or key:find("fuel_rod") or key:find("fuelrod")) then
-            return nil
-        end
         local hasQuad = key:find("quad") or key:find("x4") or key:find("4x")
-        local hasSixteen = key:find("sixteen") or key:find("sixten") or key:find("x16") or key:find("16x") or key:find("16")
+        local hasSixteen = key:find("sixteen") or key:find("x16") or key:find("16x") or key:find("16")
         if key:find("uran") then
             return hasSixteen and "htc_reactors:sixteen_uraium_fuel_rod" or (hasQuad and "htc_reactors:quad_uranium_fuel_rod" or nil)
         end
@@ -1309,7 +1281,7 @@ local function extractRodId(rod)
         if key:find("ksir") or key:find("viz") then
             return "htc_reactors:quad_ksirviz_fuel_rod"
         end
-        if key:find("fuel_rod") or key:find("fuelrod") then
+        if key:find("rod") or key:find("fuel_rod") or key:find("fuelrod") or key:find("стерж") or key:find("твэл") then
             return UNKNOWN_ROD_ID
         end
         return nil
@@ -1638,39 +1610,67 @@ local function updateRodData(num)
         if proxy then
             reactor_level[i] = getReactorLevel(proxy) or 1
             counts, totalCount, maxCount = countRodsFromStatus(proxy)
-            if counts == nil then
-                local invCounts, invTotal, invMax = countRodsFromInventory(proxy)
-                if invCounts == nil or (invTotal or 0) == 0 then
-                    local aidx = reactor_adapter_index[i]
-                    if aidx and adapters_proxy[aidx] then
-                        invCounts, invTotal, invMax = countRodsFromInventoryAllSides(adapters_proxy[aidx])
-                    end
+            local invCounts, invTotal, invMax = countRodsFromInventory(proxy)
+            if invCounts == nil or (invTotal or 0) == 0 then
+                local aidx = reactor_adapter_index[i]
+                if aidx and adapters_proxy[aidx] then
+                    invCounts, invTotal, invMax = countRodsFromInventoryAllSides(adapters_proxy[aidx])
                 end
-                if invCounts == nil or (invTotal or 0) == 0 then
-                    if #adapters_proxy > 0 then
-                        local foundCounts = nil
-                        local foundTotal = 0
-                        local foundMax = 0
-                        local foundIndex = nil
-                        local foundCount = 0
-                        for aidx, aproxy in ipairs(adapters_proxy) do
-                            local c, t, m = countRodsFromInventoryAllSides(aproxy)
-                            if type(c) == "table" and (t or 0) > 0 then
-                                foundCount = foundCount + 1
-                                foundCounts = c
-                                foundTotal = t or 0
-                                foundMax = m or 0
-                                foundIndex = aidx
-                            end
-                        end
-                        if foundCount == 1 then
-                            reactor_adapter_index[i] = foundIndex
-                            invCounts, invTotal, invMax = foundCounts, foundTotal, foundMax
+            end
+            if invCounts == nil or (invTotal or 0) == 0 then
+                if #adapters_proxy > 0 then
+                    local foundCounts = nil
+                    local foundTotal = 0
+                    local foundMax = 0
+                    local foundIndex = nil
+                    local foundCount = 0
+                    for aidx, aproxy in ipairs(adapters_proxy) do
+                        local c, t, m = countRodsFromInventoryAllSides(aproxy)
+                        if type(c) == "table" and (t or 0) > 0 then
+                            foundCount = foundCount + 1
+                            foundCounts = c
+                            foundTotal = t or 0
+                            foundMax = m or 0
+                            foundIndex = aidx
                         end
                     end
+                    if foundCount == 1 then
+                        reactor_adapter_index[i] = foundIndex
+                        invCounts, invTotal, invMax = foundCounts, foundTotal, foundMax
+                    end
                 end
-                if invCounts ~= nil and (invTotal or 0) > 0 then
-                    counts, totalCount, maxCount = invCounts, invTotal, invMax
+            end
+            if invCounts ~= nil and (invTotal or 0) > 0 then
+                counts, totalCount, maxCount = invCounts, invTotal, invMax
+            end
+            if counts == nil or (next(counts) == nil and (totalCount or 0) == 0) then
+                counts, totalCount, maxCount = countRodsFromInventory(proxy)
+            end
+            if counts == nil or (next(counts) == nil and (totalCount or 0) == 0) then
+                local aidx = reactor_adapter_index[i]
+                if aidx and adapters_proxy[aidx] then
+                    counts, totalCount, maxCount = countRodsFromInventoryAllSides(adapters_proxy[aidx])
+                end
+            end
+            if (counts == nil or (next(counts) == nil and (totalCount or 0) == 0)) and #adapters_proxy > 0 then
+                local foundCounts = nil
+                local foundTotal = 0
+                local foundMax = 0
+                local foundIndex = nil
+                local foundCount = 0
+                for aidx, aproxy in ipairs(adapters_proxy) do
+                    local c, t, m = countRodsFromInventoryAllSides(aproxy)
+                    if type(c) == "table" and next(c) ~= nil then
+                        foundCount = foundCount + 1
+                        foundCounts = c
+                        foundTotal = t or 0
+                        foundMax = m or 0
+                        foundIndex = aidx
+                    end
+                end
+                if foundCount == 1 then
+                    reactor_adapter_index[i] = foundIndex
+                    counts, totalCount, maxCount = foundCounts, foundTotal, foundMax
                 end
             end
         end
