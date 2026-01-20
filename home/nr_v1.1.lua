@@ -1334,6 +1334,11 @@ local function isDurableStack(stack)
     if (damage and damage > 0) or (dur and dur > 0) then
         return true
     end
+    -- В некоторых сборках OpenComputers не отдаёт поля прочности (maxDamage/damage),
+    -- поэтому дополнительно считаем предмет "стержнем", если он распознаётся extractRodId().
+    if extractRodId(stack) ~= nil then
+        return true
+    end
     return false
 end
 
