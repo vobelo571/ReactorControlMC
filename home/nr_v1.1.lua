@@ -102,6 +102,7 @@ local reactor_rods_filled = {}
 local reactor_rods_total = {}
 local reactor_rods_type = {}
 local reactor_rods_cache_at = {}
+local reactor_rods_callmode = {} -- address -> "noself" | "self"
 local adapters_proxy = {}
 local adapters_address = {}
 local reactor_adapter_index = {}
@@ -712,8 +713,37 @@ local function getDepletionTime(num)
         return 0
     end
 
+    -- КРИТИЧНО ДЛЯ ПРОИЗВОДИТЕЛЬНОСТИ:
+    -- если передан num — считаем только для одного реактора (без цикла по всем).
+    if num then
+        local i = tonumber(num)
+        if not i or i < 1 or i > reactors then
+            return 0
+        end
+        local rods = safeCallwg(reactors_proxy[i], "getAllFuelRodsStatus", nil)
+        local isFluid = reactor_type[i] == "Fluid"
+        if type(rods) ~= "table" or #rods == 0 then
+            reactor_depletionTime[i] = 0
+            return 0
+        end
+        local maxRod = 0
+        for _, rod in ipairs(rods) do
+            if type(rod) == "table" and rod[6] then
+                local fuelLeft = tonumber(rod[6]) or 0
+                if isFluid then
+                    fuelLeft = fuelLeft / 2
+                end
+                if fuelLeft > maxRod then
+                    maxRod = fuelLeft
+                end
+            end
+        end
+        reactor_depletionTime[i] = maxRod
+        return math.floor(maxRod or 0)
+    end
+
+    -- fallback: старое поведение "минимум по всем"
     local minReactorTime = math.huge
-    
     if #reactor_depletionTime == 0 then
         for i = 1, reactors do
             reactor_depletionTime[i] = 0
@@ -724,12 +754,10 @@ local function getDepletionTime(num)
         local rods = safeCallwg(reactors_proxy[i], "getAllFuelRodsStatus", nil)
         local isFluid = reactor_type[i] == "Fluid"
         local reactorTime = 0
-
         if type(rods) == "table" and #rods > 0 then
             local maxRod = 0
             for _, rod in ipairs(rods) do
                 if type(rod) == "table" and rod[6] then
-                    -- Добавлена проверка на число
                     local fuelLeft = tonumber(rod[6]) or 0
                     if isFluid then
                         fuelLeft = fuelLeft / 2
@@ -739,10 +767,8 @@ local function getDepletionTime(num)
                     end
                 end
             end
-
             reactorTime = maxRod
             reactor_depletionTime[i] = reactorTime
-            
             if reactorTime > 0 and reactorTime < minReactorTime then
                 minReactorTime = reactorTime
             end
@@ -753,9 +779,8 @@ local function getDepletionTime(num)
 
     if minReactorTime == math.huge then
         return 0
-    else
-        return math.floor(minReactorTime or 0)
     end
+    return math.floor(minReactorTime or 0)
 end
 
 local function drawVerticalProgressBar(x, y, height, value, maxValue, colorBottom, colorTop, colorInactive)
@@ -864,7 +889,8 @@ local function refreshReactorRodsInfo(i)
 
     local agg = nil
     if getFuelRodsFromSelectStatus then
-        agg = getFuelRodsFromSelectStatus(reactors_proxy[i])
+        local maxIdx = (tonumber(reactor_level[i]) == 6) and 20 or 64
+        agg = getFuelRodsFromSelectStatus(reactors_proxy[i], maxIdx)
     end
     local filled = 0
     local mainType = nil
@@ -889,7 +915,8 @@ end
 local function ensureReactorRodsInfoFresh(i)
     local now = computer.uptime()
     local last = reactor_rods_cache_at[i]
-    if type(last) ~= "number" or (now - last) >= 5 then
+    -- обновляем редко: опрос стержней дорогой
+    if type(last) ~= "number" or (now - last) >= 20 then
         local ok = pcall(refreshReactorRodsInfo, i)
         if not ok then
             -- никогда не роняем UI из‑за стержней
@@ -1660,7 +1687,39 @@ local function extractCountFromKv(kv)
     )
 end
 
-getFuelRodsFromSelectStatus = function(proxy)
+local function callSelectStatusRod(proxy, idx)
+    if not proxy or not proxy.getSelectStatusRod then
+        return false, nil
+    end
+    local addr = proxy.address
+    local mode = addr and reactor_rods_callmode[addr] or nil
+    local fn = proxy.getSelectStatusRod
+
+    if mode == "noself" then
+        local ok, res = pcall(fn, idx)
+        if ok and res ~= nil then return true, res end
+        return false, nil
+    elseif mode == "self" then
+        local ok, res = pcall(fn, proxy, idx)
+        if ok and res ~= nil then return true, res end
+        return false, nil
+    end
+
+    -- detect mode
+    local ok, res = pcall(fn, idx)
+    if ok and res ~= nil then
+        if addr then reactor_rods_callmode[addr] = "noself" end
+        return true, res
+    end
+    ok, res = pcall(fn, proxy, idx)
+    if ok and res ~= nil then
+        if addr then reactor_rods_callmode[addr] = "self" end
+        return true, res
+    end
+    return false, nil
+end
+
+getFuelRodsFromSelectStatus = function(proxy, maxIdx)
     -- Пытаемся получить состояние по каждому "индексу стержня".
     -- На практике метод есть в htc_reactors и требует integer index.
     if not proxy or not proxy.getSelectStatusRod then
@@ -1669,9 +1728,10 @@ getFuelRodsFromSelectStatus = function(proxy)
 
     local agg = {}
     local any = false
-    -- пробуем 0-based и 1-based индексы
-    for idx = 0, 64 do
-        local ok, rod = callMethodFlexible(proxy, "getSelectStatusRod", idx)
+    maxIdx = tonumber(maxIdx) or 64
+    -- в этой сборке индексация 1-based, но оставляем 0 как совместимость
+    for idx = 0, maxIdx do
+        local ok, rod = callSelectStatusRod(proxy, idx)
         if ok and type(rod) == "table" then
             local kv = decodeKvArray(rod) or {}
             local itemId = tostring(kv.item or rod.itemName or rod.item or rod.name or "")
@@ -3434,7 +3494,7 @@ local function handleChatCommand(nick, msg, args)
                     local filled = 0
                     local total = 0
                     for idx = 0, 64 do
-                        local ok, r = callMethodFlexible(reactors_proxy[i], "getSelectStatusRod", idx)
+                        local ok, r = callSelectStatusRod(reactors_proxy[i], idx)
                         if ok and type(r) == "table" then
                             total = total + 1
                             local kv = decodeKvArray(r) or {}
