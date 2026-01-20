@@ -2408,7 +2408,14 @@ local function updateReactorData(num)
         reactor_type[i]     = safeCall(proxy, "isActiveCooling", false) and "Fluid" or "Air"
         reactor_rf[i]       = safeCall(proxy, "getEnergyGeneration", 0)
         reactor_work[i]     = safeCall(proxy, "hasWork", false)
-        reactor_level[i]    = getReactorLevel(proxy)
+        do
+            local okLvl, lvl = pcall(getReactorLevel, proxy)
+            if okLvl and type(lvl) == "number" then
+                reactor_level[i] = math.floor(lvl)
+            else
+                reactor_level[i] = reactor_level[i] or 1
+            end
+        end
 
         if reactor_type[i] == "Fluid" then
             reactor_getcoolant[i] = safeCall(proxy, "getFluidCoolant", 0) or 0
@@ -4069,9 +4076,17 @@ local function mainLoop()
     end
 
     if isChatBox then
-        chatThread = require("thread").create(chatMessageHandler)
-        message("Чат-бокс подключен! Список команд: @help", colors.msginfo)
-        chatBox.say("§2Чат-бокс подключен! §aСписок команд: @help")
+        -- thread/process могут падать assert'ом на некоторых сборках OC/серверных ядрах.
+        -- Никогда не роняем запуск из-за чат-потока: если не получилось — просто отключаем команды.
+        local okThread, threadLib = pcall(require, "thread")
+        if okThread and type(threadLib) == "table" and type(threadLib.create) == "function" and type(chatMessageHandler) == "function" then
+            local okCreate, th = pcall(threadLib.create, chatMessageHandler)
+            if okCreate and th ~= nil then
+                chatThread = th
+                message("Чат-бокс подключен! Список команд: @help", colors.msginfo)
+                chatBox.say("§2Чат-бокс подключен! §aСписок команд: @help")
+            end
+        end
     end
 
     if work == true then
