@@ -4068,9 +4068,15 @@ local function mainLoop()
     end
 
     if isChatBox then
-        chatThread = require("thread").create(chatMessageHandler)
-        message("Чат-бокс подключен! Список команд: @help", colors.msginfo)
-        chatBox.say("§2Чат-бокс подключен! §aСписок команд: @help")
+        local okThread, threadLib = pcall(require, "thread")
+        if okThread and type(threadLib) == "table" and type(threadLib.create) == "function" and type(chatMessageHandler) == "function" then
+            local okCreate, th = pcall(threadLib.create, chatMessageHandler)
+            if okCreate and th ~= nil then
+                chatThread = th
+                message("Чат-бокс подключен! Список команд: @help", colors.msginfo)
+                chatBox.say("§2Чат-бокс подключен! §aСписок команд: @help")
+            end
+        end
     end
 
     if work == true then
