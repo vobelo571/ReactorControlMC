@@ -927,8 +927,7 @@ end
 local function ensureReactorRodsInfoFresh(i)
     local now = computer.uptime()
     local last = reactor_rods_cache_at[i]
-    -- обновляем часто, чтобы UI быстро реагировал на изменения в реакторе
-    if type(last) ~= "number" or (now - last) >= 1 then
+    if type(last) ~= "number" or (now - last) >= 5 then
         local ok = pcall(refreshReactorRodsInfo, i)
         if not ok then
             -- никогда не роняем UI из‑за стержней
