@@ -701,6 +701,18 @@ local function meGetJobState(job)
     return done, canceled
 end
 
+local function safeMeTick()
+    local ok = pcall(function()
+        mePollOrders()
+        for i = 1, reactors do
+            maybeOrderReactorRods(i)
+        end
+    end)
+    if not ok then
+        me_last_error = "ME: ошибка"
+    end
+end
+
 local function updatePerfStats(dt)
     if type(dt) ~= "number" then
         return
@@ -2371,7 +2383,8 @@ local function drawDynamic()
         buffer.drawText(123 + i, 4, colors.bg2, brailleChar(brail_console[2]))
     end
     buffer.drawText(124, 3, colors.textclr, "Информационное окно отладки:")
-    local meStatus = "МЭ: " .. (me_network and "вкл" or "выкл") .. " | Очередь: " .. tostring(#me_orders or 0)
+    local queueCount = (type(me_orders) == "table") and #me_orders or 0
+    local meStatus = "МЭ: " .. (me_network and "вкл" or "выкл") .. " | Очередь: " .. tostring(queueCount)
     if me_last_error then
         meStatus = "МЭ: " .. (me_network and "вкл" or "выкл") .. " | Ошибка: " .. tostring(me_last_error)
     end
@@ -4068,10 +4081,7 @@ local function mainLoop()
                 consumeSecond = getTotalFluidConsumption()
                 drawStatus()
                 drawFluxRFinfo()
-                mePollOrders()
-                for i = 1, reactors do
-                    maybeOrderReactorRods(i)
-                end
+                safeMeTick()
                 if flux_network == true and flux_checked == false then
                     clearRightWidgets()
                     drawDynamic()
