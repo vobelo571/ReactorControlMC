@@ -121,6 +121,7 @@ local chatCommands = {
     ["@help"] = true,
     ["@status"] = true,
     ["@rods"] = true,
+    ["@tpscan"] = true,
     ["@setporog"] = true,
     ["@start"] = true,
     ["@stop"] = true,
@@ -1561,6 +1562,76 @@ local function getFuelRodsFromStatus(proxy)
     return agg
 end
 
+local function scanTransposersToChat()
+    if not isChatBox then
+        return
+    end
+    local foundAny = false
+    local tidx = 0
+    for address in component.list("transposer") do
+        tidx = tidx + 1
+        local tp = component.proxy(address)
+        if tp then
+            local anyInv = false
+            for side = 0, 5 do
+                local size = safeCall(tp, "getInventorySize", nil, side)
+                if type(size) == "number" and size > 0 then
+                    anyInv = true
+                    foundAny = true
+
+                    -- Быстрый поиск стержней на этой стороне
+                    local rodSlots = 0
+                    local exampleName = nil
+                    local stacks = safeCall(tp, "getAllStacks", nil, side)
+                    if type(stacks) == "table" and type(stacks.getAll) == "function" then
+                        local ok, all = pcall(stacks.getAll, stacks)
+                        if ok then
+                            stacks = all
+                        end
+                    end
+                    if type(stacks) == "table" then
+                        for slot = 1, size do
+                            local st = stacks[slot]
+                            if isFuelRodStack(st) then
+                                rodSlots = rodSlots + 1
+                                if not exampleName then
+                                    exampleName = tostring(st.name or st.label or "unknown")
+                                end
+                            end
+                        end
+                    else
+                        for slot = 1, size do
+                            local st = safeCall(tp, "getStackInSlot", nil, side, slot)
+                            if isFuelRodStack(st) then
+                                rodSlots = rodSlots + 1
+                                if not exampleName then
+                                    exampleName = tostring(st.name or st.label or "unknown")
+                                end
+                            end
+                        end
+                    end
+
+                    local msg = "§7TP#" .. tostring(tidx) .. " side " .. tostring(side) .. " size " .. tostring(size)
+                    if rodSlots > 0 then
+                        msg = msg .. " §aRODS " .. tostring(rodSlots)
+                        if exampleName then
+                            msg = msg .. " §e(" .. exampleName .. ")"
+                        end
+                    end
+                    chatBox.say(msg)
+                end
+            end
+            if not anyInv then
+                -- не спамим: выводим только если у транспозера вообще нет доступных инвентарей
+                chatBox.say("§7TP#" .. tostring(tidx) .. " §8нет инвентарей на сторонах 0..5")
+            end
+        end
+    end
+    if not foundAny then
+        chatBox.say("§cТранспозеры не найдены или не дают доступа к инвентарям.")
+    end
+end
+
 local function getFuelRodsSummary(inventoryProxy, statusProxy)
     -- 1) Самый точный путь без робота: transposer, подключённый к блоку реактора (видит реальный инвентарь)
     local tAgg, tInfo = getFuelRodsFromBestTransposer()
@@ -2916,6 +2987,7 @@ local function handleChatCommand(nick, msg, args)
             chatBox.say("§a@userdel - удалить пользователя (пример: @userdel Ник)")
             chatBox.say("§a@status - статус системы")
             chatBox.say("§a@rods - стержни в реакторе (пример: @rods или @rods 1)")
+            chatBox.say("§a@tpscan - проверка транспозеров (где видны инвентари/стержни)")
             chatBox.say("§a@setporog - установка порога жидкости (пример: @setporog 500)")
             chatBox.say("§a@start - запуск всех реакторов (или @start 1 для запуска только 1-го)")
             chatBox.say("§a@stop - остановка всех реакторов (или @stop 1 для остановки только 1-го)")
@@ -3039,6 +3111,9 @@ local function handleChatCommand(nick, msg, args)
                 end
             end
         end
+
+    elseif msg:match("^@tpscan") then
+        scanTransposersToChat()
 
     elseif msg:match("^@start") then
         local num = tonumber(args:match("^(%d+)"))
