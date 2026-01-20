@@ -1417,16 +1417,14 @@ local function countRodsFromStatus(proxy)
     local total = 0
     local slots = #rods
     for _, rod in ipairs(rods) do
-        if type(rod) == "table" then
-            local fuelLeft = tonumber(rod[6]) or 0
-            local id = extractRodId(rod)
-            if id or fuelLeft > 0 then
-                if not id then
-                    id = UNKNOWN_ROD_ID
-                end
-                counts[id] = (counts[id] or 0) + 1
-                total = total + 1
+        local fuelLeft = tonumber(rod[6]) or 0
+        local id = extractRodId(rod)
+        if id or fuelLeft > 0 then
+            if not id then
+                id = UNKNOWN_ROD_ID
             end
+            counts[id] = (counts[id] or 0) + 1
+            total = total + 1
         end
     end
     return counts, total, slots
@@ -4054,6 +4052,14 @@ local function safeTraceback(err)
     return msg
 end
 
+local function safeReportLog(text)
+    pcall(logError, text)
+end
+
+local function safeReportMsg(text, color)
+    pcall(message, text, color, 34)
+end
+
 local lastCrashTime = 0
 while not exit do
     local ok, err = xpcall(mainLoop, safeTraceback)
@@ -4065,17 +4071,17 @@ while not exit do
         end
         
         if now - lastCrashTime < 5 then
-            pcall(logError, "FAILSAFE: Rapid crashing detected.")
-            pcall(message, "Rapid crashing detected.", 0xff0000, 34)
+            safeReportLog("FAILSAFE: Rapid crashing detected.")
+            safeReportMsg("Rapid crashing detected.", 0xff0000)
             os.sleep(5)
         end
         lastCrashTime = now
 
-        pcall(logError, "Global Error:")
-        pcall(logError, err)
-        pcall(message, "Code: " .. tostring(err), 0xff0000, 34)
-        pcall(message, "Global Error!", 0xff0000, 34)
-        pcall(message, "Restarting in 3 seconds...", 0xffa500, 34)
+        safeReportLog("Global Error:")
+        safeReportLog(err)
+        safeReportMsg("Code: " .. tostring(err), 0xff0000)
+        safeReportMsg("Global Error!", 0xff0000)
+        safeReportMsg("Restarting in 3 seconds...", 0xffa500)
     
         os.sleep(3)
     end
