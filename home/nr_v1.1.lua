@@ -64,7 +64,7 @@ if not ok then
     return
 end
 
--- персистентный кэш ёмкости по стержням (максимум занятых ячеек без обшивок)
+-- Persisted max capacity (max observed "rod cells" without internal casings), keyed by reactor address
 rodCapacity = rodCapacity or {}
 
 local any_reactor_on = false
@@ -413,9 +413,6 @@ local function saveCfg(param)
     file:write(string.format("debugLog = %s\n\n", tostring(debugLog)))
     file:write(string.format("isFirstStart = %s\n\n", tostring(isFirstStart)))
 
-    -- rod capacity cache
-    file:write("-- КЭШ ЁМКОСТИ СТЕРЖНЕЙ (не редактируйте вручную)\n")
-    file:write("-- rodCapacity[reactorAddress] = максимальное число \"стержневых\" ячеек (без обшивок)\n")
     file:write("rodCapacity = {\n")
     if type(rodCapacity) == "table" then
         local keys = {}
@@ -918,7 +915,7 @@ local function refreshReactorRodsInfo(i)
     end
 
     -- Кэш ёмкости: если таблицы приходят только для занятых ячеек,
-    -- сохраняем максимум наблюдавшихся стержневых ячеек + сохраняем в config.lua по адресу реактора.
+    -- сохраняем максимум наблюдавшихся стержневых ячеек.
     local cap = tonumber(reactor_rods_capacity[i]) or 0
     local addr = reactor_address and reactor_address[i] or nil
     local savedCap = (addr and type(rodCapacity) == "table") and tonumber(rodCapacity[addr]) or 0
@@ -926,7 +923,6 @@ local function refreshReactorRodsInfo(i)
         cap = savedCap
         reactor_rods_capacity[i] = cap
     end
-
     if filledCells > cap then
         cap = filledCells
         reactor_rods_capacity[i] = cap
