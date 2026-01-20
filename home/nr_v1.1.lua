@@ -47,6 +47,7 @@ if not fs.exists(configPath) then
         file:write("theme = false -- (false темная, true светлая)\n\n")
         file:write("updateCheck = true -- (false не проверять на наличие обновлений, true проверять обновления)\n\n")
         file:write("debugLog = false\n\n")
+        file:write("autoWork = false -- Авто-работа: авто-стоп если не хватает стержней; авто-старт только при установке всех стержней\n\n")
         file:write("isFirstStart = true\n\n")
         file:write("-- После внесение изменений сохраните данные (Ctrl+S) и выйдите из редактора (Ctrl+W)\n")
         file:write("-- Если в будущем захотите поменять данные то пропишите \"cd data\" затем \"edit config.lua\"\n")
@@ -63,6 +64,8 @@ if not ok then
     io.stderr:write("Ошибка загрузки конфига: " .. tostring(err) .. "\n")
     return
 end
+
+if autoWork == nil then autoWork = false end
 
 local any_reactor_on = false
 local any_reactor_off = false
@@ -106,6 +109,7 @@ local reactor_level = {}
 local adapters_proxy = {}
 local adapters_address = {}
 local reactor_adapter_index = {}
+local reactor_rods_blocked = {}
 local last_me_address = nil
 local me_network = false
 local me_proxy = nil
@@ -429,6 +433,7 @@ local function saveCfg(param)
     file:write(string.format("theme = %s -- Тема интерфейса (false тёмная, true светлая)\n\n", tostring(theme)))
     file:write(string.format("updateCheck = %s -- (false не проверять на наличие обновлений, true проверять обновления)\n\n", tostring(updateCheck)))
     file:write(string.format("debugLog = %s\n\n", tostring(debugLog)))
+    file:write(string.format("autoWork = %s -- Авто-работа: авто-стоп если не хватает стержней; авто-старт только при установке всех стержней\n\n", tostring(autoWork)))
     file:write(string.format("isFirstStart = %s\n\n", tostring(isFirstStart)))
     file:write("-- После внесение изменений сохраните данные (Ctrl+S) и выйдите из редактора (Ctrl+W)\n")
     file:write("-- Для запуска основой программы перейдите в домашнюю директорию \"cd ..\", и напишите \"main.lua\"\n")
@@ -498,6 +503,7 @@ local function initReactors()
         reactor_rod_max[i] = 0
         reactor_rod_types[i] = "н/д"
         reactor_level[i] = 1
+        reactor_rods_blocked[i] = false
     end
 end
 
@@ -1637,6 +1643,20 @@ local function updateRodData(num)
     end
 end
 
+local function hasRodInfo(i)
+    local c = reactor_rod_count[i]
+    local m = reactor_rod_max[i]
+    return type(c) == "number" and type(m) == "number" and m > 0
+end
+
+local function rodsComplete(i)
+    return hasRodInfo(i) and (reactor_rod_count[i] >= reactor_rod_max[i])
+end
+
+local function rodsMissing(i)
+    return hasRodInfo(i) and (reactor_rod_count[i] < reactor_rod_max[i])
+end
+
 local function checkReactorStatus(num)
     any_reactor_on = false
     any_reactor_off = false
@@ -2042,12 +2062,23 @@ local function start(num)
     else
         message("Запуск реакторов...", colors.textclr, 34)
     end
+    if autoWork == true then
+        updateRodData(num)
+    end
     for i = num or 1, num or reactors do
         local rType = reactor_type[i]
         local proxy = reactors_proxy[i]
 
 
-        if rType == "Fluid" then
+        if autoWork == true and not rodsComplete(i) then
+            reactor_rods_blocked[i] = true
+            starting = true
+            if hasRodInfo(i) then
+                message("Реактор #" .. i .. " не запущен: не хватает стержней (" .. tostring(reactor_rod_count[i]) .. "/" .. tostring(reactor_rod_max[i]) .. ")", colors.msgwarn, 34)
+            else
+                message("Реактор #" .. i .. " не запущен: нет данных о стержнях", colors.msgwarn, 34)
+            end
+        elseif rType == "Fluid" then
             if offFluid == false then
                 safeCall(proxy, "activate")
                 reactor_work[i] = true
@@ -2366,7 +2397,7 @@ local function drawSettingsMenu()
         stop()
     end
 
-    local modalX, modalY, modalW, modalH = 35, 10, 65, 23 -- Размеры модального окна, w - ширина, h - высота
+    local modalX, modalY, modalW, modalH = 35, 10, 65, 26 -- Размеры модального окна, w - ширина, h - высота
     local old = buffer.copy(1, 1, 160, 50)
     buffer.drawRectangle(1, 1, 160, 50, 0x000000, 0, " ", 0.4)
     buffer.drawRectangle(modalX, modalY, modalW, modalH, 0xcccccc, 0, " ")
@@ -2402,6 +2433,13 @@ local function drawSettingsMenu()
     local sw3_state = debugLog -- текущее состояние
     local sw3_pipePos = (sw3_state and (sw3_w - 2) or 1)   -- позиция (1 - лево, sw3_w-2 - право)
     drawSwitch(sw3_x, sw3_y, sw3_w, sw3_pipePos, sw3_state, nil, 0x777777, nil, 0x444444)
+
+    buffer.drawText(modalX + 5, modalY + 19, 0x000000, "Авто-работа")
+    animatedButton(1, modalX + 4, modalY + 20, "Включенно         ", nil, nil, 20, nil, nil, 0x444444, 0xffffff)
+    local sw4_x, sw4_y, sw4_w = modalX+16, modalY+21, 7
+    local sw4_state = autoWork -- текущее состояние
+    local sw4_pipePos = (sw4_state and (sw4_w - 2) or 1)
+    drawSwitch(sw4_x, sw4_y, sw4_w, sw4_pipePos, sw4_state, nil, 0x777777, nil, 0x444444)
 
     -- nickname widget
     local function drawNicknameWidget(placeholder, clr)
@@ -2484,6 +2522,7 @@ local function drawSettingsMenu()
     local NSTheme = theme
     local NSUpdateCheck = updateCheck
     local NSDebugLog = debugLog
+    local NSAutoWork = autoWork
     local NSusers = {}
     for _, u in ipairs(users) do
         table.insert(NSusers, u)
@@ -2550,6 +2589,7 @@ local function drawSettingsMenu()
                 theme = NSTheme
                 updateCheck = NSUpdateCheck
                 debugLog = NSDebugLog
+                autoWork = NSAutoWork
                 users = NSusers
                 saveCfg()
                 break
@@ -2600,6 +2640,18 @@ local function drawSettingsMenu()
                 
                 -- Тут можно добавить действие при переключении
                 -- example: debug_log = sw_state
+            elseif x >= sw4_x and x <= sw4_x + sw4_w - 1 and y == sw4_y then
+                sw4_state = not sw4_state
+                
+                local targetPos = sw4_state and (sw4_w - 2) or 1
+                local step = (targetPos > sw4_pipePos) and 1 or -1
+                
+                repeat
+                    sw4_pipePos = sw4_pipePos + step
+                    drawSwitch(sw4_x, sw4_y, sw4_w, sw4_pipePos, sw4_state, nil, 0x777777, nil, 0x444444)
+                    buffer.drawChanges()
+                    os.sleep(0.02)
+                until sw4_pipePos == targetPos
             elseif y >= modalY + 19 and y <= modalY + 21 and x >= modalX + 55 and x <= modalX + 56+5 then
                 -- Добавляем никнейм в белый список
                 animatedButton(1, modalX + 56, modalY + 19, "ADD", nil, nil, 5, nil, nil, 0x21ff21, 0xffffff) -- 0x21ff21
@@ -2644,6 +2696,7 @@ local function drawSettingsMenu()
                 theme = sw1_state
                 updateCheck = sw2_state
                 debugLog = sw3_state
+                autoWork = sw4_state
                 saveCfg()
                 
                 switchTheme()
@@ -3484,6 +3537,7 @@ local function mainLoop()
     reactor_level = {}
     reactor_rod_counts = {}
     reactor_rod_summary = {}
+    reactor_rods_blocked = {}
     
     me_proxy = nil
     me_network = false
@@ -3647,6 +3701,38 @@ local function mainLoop()
                             reactor_work[i] = false
                         end
                         
+                    end
+                end
+            end
+
+            if autoWork == true then
+                if second % 10 == 0 then
+                    updateRodData()
+                end
+
+                for i = 1, reactors do
+                    if rodsMissing(i) then
+                        if reactor_rods_blocked[i] ~= true then
+                            reactor_rods_blocked[i] = true
+                            if reactor_work[i] == true then
+                                safeCall(reactors_proxy[i], "deactivate")
+                                reactor_work[i] = false
+                            end
+                            message("Реактор " .. i .. " ОСТАНОВЛЕН! Не хватает стержней (" .. tostring(reactor_rod_count[i]) .. "/" .. tostring(reactor_rod_max[i]) .. ")", colors.msgwarn)
+                        else
+                            if reactor_work[i] == true then
+                                safeCall(reactors_proxy[i], "deactivate")
+                                reactor_work[i] = false
+                            end
+                        end
+                    elseif rodsComplete(i) then
+                        if reactor_rods_blocked[i] == true then
+                            reactor_rods_blocked[i] = false
+                            if starting == true and reactor_work[i] ~= true and reactor_aborted[i] ~= true then
+                                start(i)
+                                updateReactorData(i)
+                            end
+                        end
                     end
                 end
             end
