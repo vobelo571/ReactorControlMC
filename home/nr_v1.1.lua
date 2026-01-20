@@ -821,7 +821,7 @@ local function getRodTotalSlotsByLevel(level)
     -- ВАЖНО: внутри могут стоять "реакторные обшивки", их учитывать не нужно:
     -- реальная ёмкость по стержням = (позиции, где реально может стоять стержень) * уровень.
     -- Эти "позиции под стержни" мы берём из getSelectStatusRod (кол-во table-ответов).
-    -- Но если по какой-то причине API недоступен — fallback на 24 (это размер сетки GUI, включая обшивки).
+    -- Но если по какой-то причине API недоступен — fallback на 24.
     local lvl = tonumber(level)
     if lvl and lvl >= 1 then
         return 24
@@ -894,25 +894,19 @@ local function refreshReactorRodsInfo(i)
         end
     end
 
-    -- Определяем "ёмкость под стержни" (без обшивок и с учётом пустых ячеек).
-    -- Важно: у тебя getSelectStatusRod может возвращать таблицы только для занятых ячеек,
-    -- поэтому totalCells часто == filledCells. Чтобы не показывать 14/14 при наличии пустых —
-    -- ведём кэш максимума: как только реактор был заполнен больше, ёмкость фиксируется.
+    -- В твоей реализации getSelectStatusRod возвращает таблицы только для занятых ячеек,
+    -- поэтому totalCells часто == filledCells. Чтобы учитывать пустые "стержневые" ячейки,
+    -- ведём кэш ёмкости (максимум наблюдавшихся занятых ячеек).
     local cap = tonumber(reactor_rods_capacity[i]) or 0
-    local observed = 0
-    if totalCells > filledCells then
-        observed = totalCells
-    else
-        observed = filledCells
-    end
+    local observed = math.max(tonumber(totalCells) or 0, tonumber(filledCells) or 0)
     if observed > cap then
         cap = observed
         reactor_rods_capacity[i] = cap
     end
 
     if cap <= 0 then
-        -- fallback: если поиндексный API временно недоступен — показываем размер сетки GUI
-        cap = getRodTotalSlotsByLevel(reactor_level[i]) or filledCells
+        -- fallback: если поиндексный API временно недоступен
+        cap = getRodTotalSlotsByLevel(reactor_level[i]) or 0
         reactor_rods_capacity[i] = cap
     end
 
@@ -999,11 +993,14 @@ local function drawWidgets()
             buffer.drawText(x + 4,  y + 3,  colors.textclr, formatRFwidgets(reactor_rf[i]))
             local cellsFilled = tonumber(reactor_rods_filled[i]) or 0
             local cellsTotal = reactor_rods_total[i]
-            -- Кол-во стержней в UI показываем как "занятые ячейки / ёмкость (без обшивок)".
-            -- Уровень реактора НЕ умножаем (по твоей проверке).
-            local rodsLine = "Стержни: " .. tostring(cellsFilled)
+            local lvl = tonumber(reactor_level[i]) or 1
+            if lvl < 1 then lvl = 1 end
+
+            local rodsFilled = cellsFilled * lvl
+            local rodsLine = "Стержни: " .. tostring(rodsFilled)
             if type(cellsTotal) == "number" and cellsTotal > 0 then
-                rodsLine = rodsLine .. "/" .. tostring(cellsTotal)
+                local rodsTotal = cellsTotal * lvl
+                rodsLine = rodsLine .. "/" .. tostring(rodsTotal)
             end
             buffer.drawText(x + 4,  y + 4,  colors.textclr, rodsLine)
             buffer.drawText(x + 4,  y + 5,  colors.textclr, "Топливо: " .. tostring(reactor_rods_type[i] or "-"))
