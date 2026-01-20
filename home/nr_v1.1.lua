@@ -1351,6 +1351,72 @@ local function recordHasEligibleIntValue(rod, target)
     return false
 end
 
+local function formatRodDebugValue(v)
+    local tv = type(v)
+    if tv == "string" then
+        v = v:gsub("§.", "")
+        if #v > 70 then
+            v = v:sub(1, 67) .. "..."
+        end
+        return '"' .. v .. '"'
+    elseif tv == "number" or tv == "boolean" then
+        return tostring(v)
+    elseif tv == "table" then
+        return "{table}"
+    else
+        return "<" .. tv .. ">"
+    end
+end
+
+local function dumpRodRecordToChat(rod, prefix)
+    prefix = prefix or "rod"
+    if not isChatBox then
+        return
+    end
+    if type(rod) ~= "table" then
+        chatBox.say("§7" .. prefix .. ": " .. tostring(rod))
+        return
+    end
+
+    local parts = {}
+    local n = #rod
+    if n and n > 0 then
+        for i = 1, math.min(n, 20) do
+            table.insert(parts, tostring(i) .. "=" .. formatRodDebugValue(rod[i]))
+        end
+        if n > 20 then
+            table.insert(parts, "...(#=" .. tostring(n) .. ")")
+        end
+    else
+        table.insert(parts, "#=0")
+    end
+
+    local skeys = {}
+    for k, _ in pairs(rod) do
+        if type(k) == "string" then
+            table.insert(skeys, k)
+        end
+    end
+    table.sort(skeys)
+    for i = 1, math.min(#skeys, 18) do
+        local k = skeys[i]
+        table.insert(parts, k .. "=" .. formatRodDebugValue(rod[k]))
+    end
+    if #skeys > 18 then
+        table.insert(parts, "...(keys=" .. tostring(#skeys) .. ")")
+    end
+
+    local line = "§e" .. prefix .. ": "
+    for _, p in ipairs(parts) do
+        if #line + #p + 2 > 220 then
+            chatBox.say(line)
+            line = "§e" .. prefix .. "…: "
+        end
+        line = line .. p .. "; "
+    end
+    chatBox.say(line)
+end
+
 local function getFuelRodsFromStatus(proxy)
     local rods = safeCallwg(proxy, "getAllFuelRodsStatus", nil)
     if type(rods) ~= "table" or #rods == 0 then
@@ -2806,6 +2872,7 @@ local function handleChatCommand(nick, msg, args)
             return
         end
 
+        local debug = args:find("debug", 1, true) ~= nil
         local num = tonumber(args:match("^(%d+)"))
         if num and (num < 1 or num > reactors) then
             chatBox.say("§cНеверный номер реактора!")
@@ -2855,6 +2922,19 @@ local function handleChatCommand(nick, msg, args)
                     if shown >= 8 and #keys > 8 then
                         chatBox.say("§7... и ещё " .. tostring(#keys - 8) .. " тип(ов)")
                         break
+                    end
+                end
+            end
+
+            if debug then
+                local rods = safeCallwg(reactors_proxy[i], "getAllFuelRodsStatus", nil)
+                if type(rods) ~= "table" or #rods == 0 then
+                    chatBox.say("§7debug: нет getAllFuelRodsStatus")
+                else
+                    chatBox.say("§7debug: getAllFuelRodsStatus записей=" .. tostring(#rods))
+                    dumpRodRecordToChat(rods[1], "rod[1]")
+                    if #rods >= 2 then
+                        dumpRodRecordToChat(rods[2], "rod[2]")
                     end
                 end
             end
