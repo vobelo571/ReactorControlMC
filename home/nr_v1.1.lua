@@ -101,6 +101,8 @@ local reactor_level = {}
 local adapters_proxy = {}
 local adapters_address = {}
 local reactor_adapter_index = {}
+local transposers_proxy = {}
+local transposers_address = {}
 local last_me_address = nil
 local me_network = false
 local me_proxy = nil
@@ -477,6 +479,17 @@ local function initAdapters()
     end
     for i = 1, math.min(reactors, idx) do
         reactor_adapter_index[i] = i
+    end
+end
+
+local function initTransposers()
+    transposers_address = {}
+    transposers_proxy = {}
+    local idx = 0
+    for address in component.list("transposer") do
+        idx = idx + 1
+        transposers_address[idx] = address
+        transposers_proxy[idx] = component.proxy(address)
     end
 end
 
@@ -1250,6 +1263,21 @@ local function addFuelRodAgg(agg, key, addCount, stack)
     end
 end
 
+local function addFuelRodAggPercent(agg, key, addCount, percent)
+    addFuelRodAgg(agg, key, addCount, nil)
+    local e = agg[key]
+    if not e then
+        return
+    end
+    if type(percent) == "number" then
+        local p = math.max(0, math.min(1, percent))
+        if e.minP == nil or p < e.minP then e.minP = p end
+        if e.maxP == nil or p > e.maxP then e.maxP = p end
+        e.sumP = e.sumP + p
+        e.pN = e.pN + 1
+    end
+end
+
 local function getInventorySizeOnSide(proxy, side)
     if side == nil then
         return safeCall(proxy, "getInventorySize", nil)
@@ -1351,6 +1379,78 @@ local function recordHasEligibleIntValue(rod, target)
     return false
 end
 
+<<<<<<< HEAD
+local function formatRodDebugValue(v)
+    local tv = type(v)
+    if tv == "string" then
+        v = v:gsub("§.", "")
+        if #v > 70 then
+            v = v:sub(1, 67) .. "..."
+        end
+        return '"' .. v .. '"'
+    elseif tv == "number" or tv == "boolean" then
+        return tostring(v)
+    elseif tv == "table" then
+        return "{table}"
+    else
+        return "<" .. tv .. ">"
+    end
+end
+
+local function dumpRodRecordToChat(rod, prefix)
+    prefix = prefix or "rod"
+    if not isChatBox then
+        return
+    end
+    if type(rod) ~= "table" then
+        chatBox.say("§7" .. prefix .. ": " .. tostring(rod))
+        return
+    end
+
+    local parts = {}
+    local n = #rod
+    if n and n > 0 then
+        for i = 1, math.min(n, 20) do
+            table.insert(parts, tostring(i) .. "=" .. formatRodDebugValue(rod[i]))
+        end
+        if n > 20 then
+            table.insert(parts, "...(#=" .. tostring(n) .. ")")
+        end
+    else
+        table.insert(parts, "#=0")
+    end
+
+    local skeys = {}
+    for k, _ in pairs(rod) do
+        if type(k) == "string" then
+            table.insert(skeys, k)
+        end
+    end
+    table.sort(skeys)
+    for i = 1, math.min(#skeys, 18) do
+        local k = skeys[i]
+        table.insert(parts, k .. "=" .. formatRodDebugValue(rod[k]))
+    end
+    if #skeys > 18 then
+        table.insert(parts, "...(keys=" .. tostring(#skeys) .. ")")
+    end
+
+    local line = "§e" .. prefix .. ": "
+    for _, p in ipairs(parts) do
+        if #line + #p + 2 > 220 then
+            chatBox.say(line)
+            line = "§e" .. prefix .. "…: "
+        end
+        line = line .. p .. "; "
+    end
+    chatBox.say(line)
+end
+
+local function decodeKvArray(t)
+    -- getAllFuelRodsStatus в твоей версии возвращает массив вида:
+    -- {"item","modid:item","type","fuelrod","fuel",12568,"maxFuel",20000,...}
+    if type(t) ~= "table" then
+=======
 local function formatRodDebugValue(v)
     local tv = type(v)
     if tv == "string" then
@@ -1420,51 +1520,104 @@ end
 local function getFuelRodsFromStatus(proxy)
     local rods = safeCallwg(proxy, "getAllFuelRodsStatus", nil)
     if type(rods) ~= "table" or #rods == 0 then
+>>>>>>> 4b47a75d108f179d5cd7d8e43016863fa63b2463
         return nil
     end
+    local m = {}
+    local n = #t
+    if not n or n <= 1 then
+        return m
+    end
+    local i = 1
+    while i <= n - 1 do
+        local k = t[i]
+        local v = t[i + 1]
+        if type(k) == "string" then
+            m[k] = v
+        end
+        i = i + 2
+    end
+    return m
+end
 
-    -- Если статус возвращает по-слотовые записи, а в каждом слоте лежит "стек" предметов,
-    -- попробуем определить наиболее вероятный размер стека из структуры записей (например, 6).
-    local freq = {}
-    for _, rod in ipairs(rods) do
-        if type(rod) == "table" then
-            local set = collectEligibleIntValuesFromRodRecord(rod, {})
-            for iv in pairs(set or {}) do
-                freq[iv] = (freq[iv] or 0) + 1
+local function getFuelRodsFromTransposerInventories()
+    -- Возвращает список найденных "реакторных" инвентарей рядом с транспозерами:
+    -- { {tidx=1, side=0, size=20, agg=...}, ... }
+    local results = {}
+    if not transposers_proxy or #transposers_proxy == 0 then
+        return results
+    end
+
+    for tidx, tp in ipairs(transposers_proxy) do
+        if tp then
+            for side = 0, 5 do
+                local size = safeCall(tp, "getInventorySize", nil, side)
+                if type(size) == "number" and size > 0 then
+                    local stacks = safeCall(tp, "getAllStacks", nil, side)
+                    if type(stacks) == "table" and type(stacks.getAll) == "function" then
+                        local ok, all = pcall(stacks.getAll, stacks)
+                        if ok then
+                            stacks = all
+                        end
+                    end
+
+                    local agg = {}
+                    local any = false
+                    if type(stacks) == "table" then
+                        for slot = 1, size do
+                            local st = stacks[slot]
+                            if isFuelRodStack(st) then
+                                any = true
+                                addFuelRodAgg(agg, tostring(st.name or st.label or "unknown"), tonumber(st.size) or 1, st)
+                            end
+                        end
+                    else
+                        -- fallback по слотам
+                        for slot = 1, size do
+                            local st = safeCall(tp, "getStackInSlot", nil, side, slot)
+                            if isFuelRodStack(st) then
+                                any = true
+                                addFuelRodAgg(agg, tostring(st.name or st.label or "unknown"), tonumber(st.size) or 1, st)
+                            end
+                        end
+                    end
+
+                    -- фильтруем "не тот" инвентарь: хотим именно инвентарь, где есть стержни
+                    if any and next(agg) ~= nil then
+                        table.insert(results, {tidx = tidx, side = side, size = size, agg = agg})
+                    end
+                end
             end
         end
     end
-    local commonStack = nil
-    local commonFreq = 0
-    for iv, f in pairs(freq) do
-        if f > commonFreq or (f == commonFreq and (commonStack == nil or iv > commonStack)) then
-            commonStack = iv
-            commonFreq = f
-        end
+    return results
+end
+
+local function getFuelRodsFromStatus(proxy)
+    local rods = safeCallwg(proxy, "getAllFuelRodsStatus", nil)
+    if type(rods) ~= "table" or #rods == 0 then
+        return nil
     end
 
     local agg = {}
     for _, rod in ipairs(rods) do
         if type(rod) == "table" then
-            local key = tostring(rod.name or rod.type or rod.itemName or rod.item or "")
-            if key == "" or key == "nil" then
-                -- часто в массивной части лежит item id, например rod[4] = "modid:item"
-                if type(rod[4]) == "string" and rod[4]:find(":", 1, true) then
-                    key = rod[4]
-                else
-                    key = tostring(extractFirstStringWithColon(rod) or "unknown")
-                end
+            local kv = decodeKvArray(rod)
+            local itemId = tostring((kv and kv.item) or rod.itemName or rod.item or rod.name or "")
+            if itemId == "" or itemId == "nil" then
+                itemId = tostring(extractFirstStringWithColon(rod) or "unknown")
             end
 
-            local cnt = tonumber(rod.count or rod.size or rod.amount or rod.qty)
-            -- частый формат: rod[5] = stackSize (1..6), rod[6] = fuelLeft (уже используется в getDepletionTime)
-            if not cnt then
-                cnt = tonumber(rod[5])
+            -- В твоём debug нет поля с количеством "1..6", только fuel/maxFuel.
+            -- Поэтому точное число предметов в слоте через adapter получить нельзя — считаем слоты.
+            local fuel = kv and tonumber(kv.fuel) or tonumber(rod.fuel)
+            local maxFuel = kv and tonumber(kv.maxFuel) or tonumber(rod.maxFuel)
+            local pct = nil
+            if fuel and maxFuel and maxFuel > 0 then
+                pct = fuel / maxFuel
             end
-            if not cnt and commonStack and recordHasEligibleIntValue(rod, commonStack) then
-                cnt = commonStack
-            end
-            addFuelRodAgg(agg, key, cnt or 1, rod)
+
+            addFuelRodAggPercent(agg, itemId, 1, pct)
         else
             addFuelRodAgg(agg, "unknown", 1, nil)
         end
@@ -1473,6 +1626,14 @@ local function getFuelRodsFromStatus(proxy)
 end
 
 local function getFuelRodsSummary(inventoryProxy, statusProxy)
+    -- 1) Если есть транспозер и он реально видит инвентарь со стержнями — используем его (точный stack-size 1..6).
+    local tps = getFuelRodsFromTransposerInventories()
+    if tps and #tps > 0 then
+        -- если реакторов несколько, выдаём по порядку найденных инвентарей
+        -- (в @rods дополнительно покажем, какой транспозер/side выбран)
+        return tps
+    end
+
     local agg = nil
     if inventoryProxy then
         agg = getFuelRodsFromInventory(inventoryProxy)
@@ -2893,35 +3054,75 @@ local function handleChatCommand(nick, msg, args)
                 end
             end
 
-            local agg = getFuelRodsSummary(invProxy, reactors_proxy[i])
-            if not agg or next(agg) == nil then
-                chatBox.say("§eРеактор " .. i .. ": §7нет данных о стержнях")
-            else
-                chatBox.say("§e=== Стержни реактора " .. i .. " ===")
-                local keys = {}
-                for k in pairs(agg) do
-                    table.insert(keys, tostring(k))
-                end
-                table.sort(keys)
+            local summary = getFuelRodsSummary(invProxy, reactors_proxy[i])
 
-                local shown = 0
-                for _, k in ipairs(keys) do
-                    local e = agg[k]
-                    local line = "§a" .. k .. ": §e" .. tostring(e.count or 0)
-                    if e.slots and e.slots > 0 then
-                        line = line .. " §7(слотов: " .. tostring(e.slots) .. ")"
+            -- если summary = список транспозер-инвентарей
+            if type(summary) == "table" and summary[1] and type(summary[1]) == "table" and summary[1].agg then
+                local pick = summary[i] or summary[1]
+                local agg = pick and pick.agg or nil
+                if not agg or next(agg) == nil then
+                    chatBox.say("§eРеактор " .. i .. ": §7нет данных о стержнях")
+                else
+                    chatBox.say("§e=== Стержни реактора " .. i .. " ===")
+                    chatBox.say("§7Источник: Transposer #" .. tostring(pick.tidx) .. " side " .. tostring(pick.side) .. " (size " .. tostring(pick.size) .. ")")
+                    local keys = {}
+                    for k in pairs(agg) do
+                        table.insert(keys, tostring(k))
                     end
-                    if e.pN and e.pN > 0 then
-                        local avg = (e.sumP / e.pN) * 100
-                        local mn = (e.minP or 0) * 100
-                        local mx = (e.maxP or 0) * 100
-                        line = line .. string.format(" §7(прочн. %.0f%%, мин %.0f%%, макс %.0f%%)", avg, mn, mx)
+                    table.sort(keys)
+
+                    local shown = 0
+                    for _, k in ipairs(keys) do
+                        local e = agg[k]
+                        local line = "§a" .. k .. ": §e" .. tostring(e.count or 0)
+                        if e.slots and e.slots > 0 then
+                            line = line .. " §7(слотов: " .. tostring(e.slots) .. ")"
+                        end
+                        if e.pN and e.pN > 0 then
+                            local avg = (e.sumP / e.pN) * 100
+                            local mn = (e.minP or 0) * 100
+                            local mx = (e.maxP or 0) * 100
+                            line = line .. string.format(" §7(прочн. %.0f%%, мин %.0f%%, макс %.0f%%)", avg, mn, mx)
+                        end
+                        chatBox.say(line)
+                        shown = shown + 1
+                        if shown >= 8 and #keys > 8 then
+                            chatBox.say("§7... и ещё " .. tostring(#keys - 8) .. " тип(ов)")
+                            break
+                        end
                     end
-                    chatBox.say(line)
-                    shown = shown + 1
-                    if shown >= 8 and #keys > 8 then
-                        chatBox.say("§7... и ещё " .. tostring(#keys - 8) .. " тип(ов)")
-                        break
+                end
+            else
+                local agg = summary
+                if not agg or next(agg) == nil then
+                    chatBox.say("§eРеактор " .. i .. ": §7нет данных о стержнях")
+                else
+                    chatBox.say("§e=== Стержни реактора " .. i .. " ===")
+                    local keys = {}
+                    for k in pairs(agg) do
+                        table.insert(keys, tostring(k))
+                    end
+                    table.sort(keys)
+
+                    local shown = 0
+                    for _, k in ipairs(keys) do
+                        local e = agg[k]
+                        local line = "§a" .. k .. ": §e" .. tostring(e.count or 0)
+                        if e.slots and e.slots > 0 then
+                            line = line .. " §7(слотов: " .. tostring(e.slots) .. ")"
+                        end
+                        if e.pN and e.pN > 0 then
+                            local avg = (e.sumP / e.pN) * 100
+                            local mn = (e.minP or 0) * 100
+                            local mx = (e.maxP or 0) * 100
+                            line = line .. string.format(" §7(ресурс %.0f%%, мин %.0f%%, макс %.0f%%)", avg, mn, mx)
+                        end
+                        chatBox.say(line)
+                        shown = shown + 1
+                        if shown >= 8 and #keys > 8 then
+                            chatBox.say("§7... и ещё " .. tostring(#keys - 8) .. " тип(ов)")
+                            break
+                        end
                     end
                 end
             end
@@ -3413,6 +3614,8 @@ local function mainLoop()
     adapters_address = {}
     reactor_adapter_index = {}
     reactor_level = {}
+    transposers_proxy = {}
+    transposers_address = {}
     
     me_proxy = nil
     me_network = false
@@ -3428,6 +3631,7 @@ local function mainLoop()
     switchTheme(theme)
     initReactors()
     initAdapters()
+    initTransposers()
     local addr = initMe()
     initFlux()
     initChatBox()
@@ -3451,8 +3655,6 @@ local function mainLoop()
     message(" ")
     userUpdate()
     message("Инициализация реакторов...", colors.textclr)
-    -- supportersText = loadSupportersFromURL("https://github.com/P1KaChU337/Reactor-Control-for-OpenComputers/raw/refs/heads/main/supporters.txt")
-    -- changelog = loadChangelog("https://github.com/P1KaChU337/Reactor-Control-for-OpenComputers/raw/refs/heads/main/changelog.lua")
     updateReactorData()
     if reactors ~= 0 then
         message("Реакторы инициализированы!", colors.msginfo, 34)
@@ -3594,12 +3796,8 @@ local function mainLoop()
                             reason = "Нет жидкости"
                             message("Реактор " .. i .. " ОСТАНОВЛЕН! Уровень буфера критически низок", colors.msgwarn)
                             message("Проверьте реакторную зону!", colors.msgwarn)
-                            -- message("Запуск реактора #" .. i .. " возможен только вручную.", colors.msgwarn)
                         end
                     end
-
-                    -- 2. Проверка на готовность к запуску (выше 80%)
-                    -- Это позволит убрать флаг ошибки, когда бак достаточно заполнится
                     if reactor_aborted[i] and current_coolant >= (max_coolant * 0.8) and offFluid == false then
                         reactor_aborted[i] = false
                         message("Реактор " .. i .. " готов к работе (уровень восстановился).", colors.msginfo)
