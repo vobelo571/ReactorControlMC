@@ -3293,6 +3293,33 @@ local function handleChatCommand(nick, msg, args)
                         dumpRodRecordToChat(rods[2], "rod[2]")
                     end
                 end
+
+                -- debug для поиндексного API
+                if reactors_proxy[i] and reactors_proxy[i].getSelectStatusRod then
+                    chatBox.say("§7debug: getSelectStatusRod(1..3)")
+                    for idx = 1, 3 do
+                        local r = safeCallwg(reactors_proxy[i], "getSelectStatusRod", nil, idx)
+                        dumpRodRecordToChat(r, "sel[" .. tostring(idx) .. "]")
+                    end
+
+                    -- краткая сводка: сколько индексов вообще дают item
+                    local filled = 0
+                    local total = 0
+                    for idx = 1, 64 do
+                        local r = safeCallwg(reactors_proxy[i], "getSelectStatusRod", nil, idx)
+                        if type(r) == "table" then
+                            total = total + 1
+                            local kv = decodeKvArray(r) or {}
+                            local itemId = tostring(kv.item or "")
+                            if itemId ~= "" and itemId ~= "nil" then
+                                filled = filled + 1
+                            end
+                        end
+                    end
+                    chatBox.say("§7debug: getSelectStatusRod tables=" .. tostring(total) .. ", filled(item)=" .. tostring(filled))
+                else
+                    chatBox.say("§7debug: нет метода getSelectStatusRod")
+                end
             end
         end
 
