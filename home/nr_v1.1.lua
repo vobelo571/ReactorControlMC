@@ -1690,8 +1690,6 @@ getFuelRodsFromSelectStatus = function(proxy)
             if itemId == "" or itemId == "nil" then
                 itemId = tostring(extractFirstStringWithColon(rod) or "unknown")
             end
-
-            -- Игнорируем защитную оболочку: не расходуется, без прочности, не является стержнем
             if isIgnoredRodItemId(itemId) then
                 goto continue_select
             end
@@ -1744,6 +1742,9 @@ local function getFuelRodsFromStatus(proxy)
             if itemId == "" or itemId == "nil" then
                 itemId = tostring(extractFirstStringWithColon(rod) or "unknown")
             end
+            if isIgnoredRodItemId(itemId) then
+                goto continue_status
+            end
 
             -- В твоём debug нет поля с количеством "1..6", только fuel/maxFuel.
             -- Поэтому точное число предметов в слоте через adapter получить нельзя — считаем слоты.
@@ -1755,6 +1756,7 @@ local function getFuelRodsFromStatus(proxy)
             end
 
             addFuelRodAggPercent(agg, itemId, 1, pct)
+            ::continue_status::
         else
             addFuelRodAgg(agg, "unknown", 1, nil)
         end
