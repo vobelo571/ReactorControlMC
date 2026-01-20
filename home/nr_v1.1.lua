@@ -64,6 +64,9 @@ if not ok then
     return
 end
 
+-- персистентный кэш ёмкости по стержням (максимум занятых ячеек без обшивок)
+rodCapacity = rodCapacity or {}
+
 local any_reactor_on = false
 local any_reactor_off = false
 
@@ -409,6 +412,26 @@ local function saveCfg(param)
     file:write(string.format("updateCheck = %s -- (false не проверять на наличие обновлений, true проверять обновления)\n\n", tostring(updateCheck)))
     file:write(string.format("debugLog = %s\n\n", tostring(debugLog)))
     file:write(string.format("isFirstStart = %s\n\n", tostring(isFirstStart)))
+
+    -- rod capacity cache
+    file:write("-- КЭШ ЁМКОСТИ СТЕРЖНЕЙ (не редактируйте вручную)\n")
+    file:write("-- rodCapacity[reactorAddress] = максимальное число \"стержневых\" ячеек (без обшивок)\n")
+    file:write("rodCapacity = {\n")
+    if type(rodCapacity) == "table" then
+        local keys = {}
+        for k in pairs(rodCapacity) do
+            table.insert(keys, tostring(k))
+        end
+        table.sort(keys)
+        for _, k in ipairs(keys) do
+            local v = tonumber(rodCapacity[k])
+            if v and v > 0 then
+                file:write(string.format("  [%q] = %d,\n", k, math.floor(v)))
+            end
+        end
+    end
+    file:write("}\n\n")
+
     file:write("-- После внесение изменений сохраните данные (Ctrl+S) и выйдите из редактора (Ctrl+W)\n")
     file:write("-- Для запуска основой программы перейдите в домашнюю директорию \"cd ..\", и напишите \"main.lua\"\n")
     
@@ -895,11 +918,22 @@ local function refreshReactorRodsInfo(i)
     end
 
     -- Кэш ёмкости: если таблицы приходят только для занятых ячеек,
-    -- сохраняем максимум наблюдавшихся стержневых ячеек.
+    -- сохраняем максимум наблюдавшихся стержневых ячеек + сохраняем в config.lua по адресу реактора.
     local cap = tonumber(reactor_rods_capacity[i]) or 0
+    local addr = reactor_address and reactor_address[i] or nil
+    local savedCap = (addr and type(rodCapacity) == "table") and tonumber(rodCapacity[addr]) or 0
+    if savedCap and savedCap > cap then
+        cap = savedCap
+        reactor_rods_capacity[i] = cap
+    end
+
     if filledCells > cap then
         cap = filledCells
         reactor_rods_capacity[i] = cap
+        if addr and type(rodCapacity) == "table" then
+            rodCapacity[addr] = cap
+            saveCfg()
+        end
     end
     if cap > totalCells then
         totalCells = cap
