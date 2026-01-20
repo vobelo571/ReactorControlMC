@@ -1417,14 +1417,16 @@ local function countRodsFromStatus(proxy)
     local total = 0
     local slots = #rods
     for _, rod in ipairs(rods) do
-        local fuelLeft = tonumber(rod[6]) or 0
-        local id = extractRodId(rod)
-        if id or fuelLeft > 0 then
-            if not id then
-                id = UNKNOWN_ROD_ID
+        if type(rod) == "table" then
+            local fuelLeft = tonumber(rod[6]) or 0
+            local id = extractRodId(rod)
+            if id or fuelLeft > 0 then
+                if not id then
+                    id = UNKNOWN_ROD_ID
+                end
+                counts[id] = (counts[id] or 0) + 1
+                total = total + 1
             end
-            counts[id] = (counts[id] or 0) + 1
-            total = total + 1
         end
     end
     return counts, total, slots
@@ -4052,28 +4054,6 @@ local function safeTraceback(err)
     return msg
 end
 
-local function writeCrashLog(err)
-    local ok = pcall(function()
-        if not fs.exists(dataFolder) then
-            fs.makeDirectory(dataFolder)
-        end
-        local path = dataFolder .. "reactor_crash.log"
-        local f = io.open(path, "a")
-        if not f then
-            return
-        end
-        f:write(string.format("[%s] %s\n", os.date("%Y-%m-%d %H:%M:%S"), tostring(err)))
-        f:close()
-    end)
-    if not ok then
-        local f = io.open("/home/reactor_errors.log", "a")
-        if f then
-            f:write(string.format("[%s] crash log write failed\n", os.date("%Y-%m-%d %H:%M:%S")))
-            f:close()
-        end
-    end
-end
-
 local lastCrashTime = 0
 while not exit do
     local ok, err = xpcall(mainLoop, safeTraceback)
@@ -4085,18 +4065,17 @@ while not exit do
         end
         
         if now - lastCrashTime < 5 then
-            logError("FAILSAFE: Rapid crashing detected.")
-            message("Rapid crashing detected.", 0xff0000, 34)
+            pcall(logError, "FAILSAFE: Rapid crashing detected.")
+            pcall(message, "Rapid crashing detected.", 0xff0000, 34)
             os.sleep(5)
         end
         lastCrashTime = now
 
-        logError("Global Error:")
-        logError(err)
-        writeCrashLog(err)
-        message("Code: " .. tostring(err), 0xff0000, 34)
-        message("Global Error!", 0xff0000, 34)
-        message("Restarting in 3 seconds...", 0xffa500, 34)
+        pcall(logError, "Global Error:")
+        pcall(logError, err)
+        pcall(message, "Code: " .. tostring(err), 0xff0000, 34)
+        pcall(message, "Global Error!", 0xff0000, 34)
+        pcall(message, "Restarting in 3 seconds...", 0xffa500, 34)
     
         os.sleep(3)
     end
