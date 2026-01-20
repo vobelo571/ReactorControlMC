@@ -1316,11 +1316,67 @@ local function extractFirstStringWithColon(t)
     return nil
 end
 
+local function collectEligibleIntValuesFromRodRecord(rod, outSet)
+    -- Пытаемся найти "размер стака" в статусе стержня.
+    -- Часто первые 2-3 числа — координаты/позиции, а один из полей — размер стака (например 6).
+    if type(rod) ~= "table" then
+        return
+    end
+    outSet = outSet or {}
+    for k, v in pairs(rod) do
+        if type(v) == "number" then
+            local iv = math.floor(v)
+            if v == iv and iv >= 2 and iv <= 64 then
+                -- отбрасываем наиболее вероятные "координатные" индексы и fuelLeft (6-й индекс уже встречался)
+                if k ~= 1 and k ~= 2 and k ~= 3 and k ~= 6 then
+                    outSet[iv] = true
+                end
+            end
+        end
+    end
+    return outSet
+end
+
+local function recordHasEligibleIntValue(rod, target)
+    if type(rod) ~= "table" or type(target) ~= "number" then
+        return false
+    end
+    for k, v in pairs(rod) do
+        if k ~= 1 and k ~= 2 and k ~= 3 and k ~= 6 and type(v) == "number" then
+            if v == target then
+                return true
+            end
+        end
+    end
+    return false
+end
+
 local function getFuelRodsFromStatus(proxy)
     local rods = safeCallwg(proxy, "getAllFuelRodsStatus", nil)
     if type(rods) ~= "table" or #rods == 0 then
         return nil
     end
+
+    -- Если статус возвращает по-слотовые записи, а в каждом слоте лежит "стек" предметов,
+    -- попробуем определить наиболее вероятный размер стека из структуры записей (например, 6).
+    local freq = {}
+    for _, rod in ipairs(rods) do
+        if type(rod) == "table" then
+            local set = collectEligibleIntValuesFromRodRecord(rod, {})
+            for iv in pairs(set or {}) do
+                freq[iv] = (freq[iv] or 0) + 1
+            end
+        end
+    end
+    local commonStack = nil
+    local commonFreq = 0
+    for iv, f in pairs(freq) do
+        if f > commonFreq or (f == commonFreq and (commonStack == nil or iv > commonStack)) then
+            commonStack = iv
+            commonFreq = f
+        end
+    end
+
     local agg = {}
     for _, rod in ipairs(rods) do
         if type(rod) == "table" then
@@ -1330,6 +1386,9 @@ local function getFuelRodsFromStatus(proxy)
             end
 
             local cnt = tonumber(rod.count or rod.size or rod.amount or rod.qty)
+            if not cnt and commonStack and recordHasEligibleIntValue(rod, commonStack) then
+                cnt = commonStack
+            end
             addFuelRodAgg(agg, key, cnt or 1, rod)
         else
             addFuelRodAgg(agg, "unknown", 1, nil)
