@@ -64,9 +64,6 @@ if not ok then
     return
 end
 
--- Persisted max capacity (max observed "rod cells" without internal casings), keyed by reactor address
-rodCapacity = rodCapacity or {}
-
 local any_reactor_on = false
 local any_reactor_off = false
 
@@ -412,23 +409,6 @@ local function saveCfg(param)
     file:write(string.format("updateCheck = %s -- (false не проверять на наличие обновлений, true проверять обновления)\n\n", tostring(updateCheck)))
     file:write(string.format("debugLog = %s\n\n", tostring(debugLog)))
     file:write(string.format("isFirstStart = %s\n\n", tostring(isFirstStart)))
-
-    file:write("rodCapacity = {\n")
-    if type(rodCapacity) == "table" then
-        local keys = {}
-        for k in pairs(rodCapacity) do
-            table.insert(keys, tostring(k))
-        end
-        table.sort(keys)
-        for _, k in ipairs(keys) do
-            local v = tonumber(rodCapacity[k])
-            if v and v > 0 then
-                file:write(string.format("  [%q] = %d,\n", k, math.floor(v)))
-            end
-        end
-    end
-    file:write("}\n\n")
-
     file:write("-- После внесение изменений сохраните данные (Ctrl+S) и выйдите из редактора (Ctrl+W)\n")
     file:write("-- Для запуска основой программы перейдите в домашнюю директорию \"cd ..\", и напишите \"main.lua\"\n")
     
@@ -917,19 +897,9 @@ local function refreshReactorRodsInfo(i)
     -- Кэш ёмкости: если таблицы приходят только для занятых ячеек,
     -- сохраняем максимум наблюдавшихся стержневых ячеек.
     local cap = tonumber(reactor_rods_capacity[i]) or 0
-    local addr = reactor_address and reactor_address[i] or nil
-    local savedCap = (addr and type(rodCapacity) == "table") and tonumber(rodCapacity[addr]) or 0
-    if savedCap and savedCap > cap then
-        cap = savedCap
-        reactor_rods_capacity[i] = cap
-    end
     if filledCells > cap then
         cap = filledCells
         reactor_rods_capacity[i] = cap
-        if addr and type(rodCapacity) == "table" then
-            rodCapacity[addr] = cap
-            saveCfg()
-        end
     end
     if cap > totalCells then
         totalCells = cap
@@ -957,7 +927,8 @@ end
 local function ensureReactorRodsInfoFresh(i)
     local now = computer.uptime()
     local last = reactor_rods_cache_at[i]
-    if type(last) ~= "number" or (now - last) >= 5 then
+    -- обновляем часто, чтобы UI быстро реагировал на изменения в реакторе
+    if type(last) ~= "number" or (now - last) >= 1 then
         local ok = pcall(refreshReactorRodsInfo, i)
         if not ok then
             -- никогда не роняем UI из‑за стержней
@@ -2438,6 +2409,7 @@ local function updateReactorData(num)
         reactor_type[i]     = safeCall(proxy, "isActiveCooling", false) and "Fluid" or "Air"
         reactor_rf[i]       = safeCall(proxy, "getEnergyGeneration", 0)
         reactor_work[i]     = safeCall(proxy, "hasWork", false)
+        reactor_level[i]    = getReactorLevel(proxy)
 
         if reactor_type[i] == "Fluid" then
             reactor_getcoolant[i] = safeCall(proxy, "getFluidCoolant", 0) or 0
