@@ -101,6 +101,7 @@ local reactor_level = {}
 local adapters_proxy = {}
 local adapters_address = {}
 local reactor_adapter_index = {}
+-- transposer-скан делаем лениво (только по команде @rods), чтобы не нагружать старт
 local transposers_proxy = {}
 local transposers_address = {}
 local last_me_address = nil
@@ -1335,15 +1336,14 @@ end
 local function getFuelRodsFromBestTransposer()
     -- Ищем среди всех транспозеров и их сторон инвентарь, где реально лежат стержни.
     -- Возвращаем agg и строку источника (для вывода).
-    if not transposers_proxy or #transposers_proxy == 0 then
-        return nil, nil
-    end
-
     local bestAgg = nil
     local bestInfo = nil
     local bestScore = -1
 
-    for tidx, tp in ipairs(transposers_proxy) do
+    local tidx = 0
+    for address in component.list("transposer") do
+        tidx = tidx + 1
+        local tp = component.proxy(address)
         if tp then
             for side = 0, 5 do
                 local size = safeCall(tp, "getInventorySize", nil, side)
@@ -3513,8 +3513,6 @@ local function mainLoop()
     adapters_address = {}
     reactor_adapter_index = {}
     reactor_level = {}
-    transposers_proxy = {}
-    transposers_address = {}
     
     me_proxy = nil
     me_network = false
@@ -3530,7 +3528,6 @@ local function mainLoop()
     switchTheme(theme)
     initReactors()
     initAdapters()
-    initTransposers()
     local addr = initMe()
     initFlux()
     initChatBox()
