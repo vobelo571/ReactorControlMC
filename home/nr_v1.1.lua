@@ -110,6 +110,9 @@ local adapters_proxy = {}
 local adapters_address = {}
 local reactor_adapter_index = {}
 local reactor_rods_blocked = {}
+local reactor_rods_side = {}
+local reactor_rods_slots = {}
+local reactor_rods_stackMax = {}
 local last_me_address = nil
 local me_network = false
 local me_proxy = nil
@@ -504,6 +507,9 @@ local function initReactors()
         reactor_rod_types[i] = "н/д"
         reactor_level[i] = 1
         reactor_rods_blocked[i] = false
+        reactor_rods_side[i] = nil
+        reactor_rods_slots[i] = nil
+        reactor_rods_stackMax[i] = nil
     end
 end
 
@@ -1363,6 +1369,107 @@ local function isDurableStack(stack)
     return false
 end
 
+local function getStackCount(stack)
+    local count = tonumber(stack.size) or tonumber(stack.count) or 1
+    return math.max(count, 1)
+end
+
+local function getStackMaxSize(stack)
+    local maxSize = tonumber(stack.maxSize) or tonumber(stack.max_size) or tonumber(stack.maxStackSize) or tonumber(stack.max_stack_size) or tonumber(stack.maxCount) or tonumber(stack.max_count)
+    if maxSize and maxSize > 0 then
+        return maxSize
+    end
+    return nil
+end
+
+local function isFuelRodStack(stack)
+    local id = extractRodId(stack)
+    if not id then
+        return false, nil
+    end
+    if id == UNKNOWN_ROD_ID then
+        return true, id
+    end
+    if rod_types[id] then
+        return true, id
+    end
+    return false, nil
+end
+
+local function countRodBufferFromAdapter(adapterProxy, preferredSide, fallbackMaxStack)
+    if not adapterProxy then
+        return nil
+    end
+
+    local function scanSide(side)
+        local size = safeCall(adapterProxy, "getInventorySize", nil, side)
+        if type(size) ~= "number" or size <= 0 then
+            return nil
+        end
+
+        local counts = {}
+        local total = 0
+        local maxStack = fallbackMaxStack or 1
+        local sawRod = false
+
+        for slot = 1, size do
+            local stack = getStackInSlot(adapterProxy, side, slot)
+            local st = type(stack)
+            if st == "table" or st == "userdata" then
+                local okRod, id = isFuelRodStack(stack)
+                if okRod then
+                    sawRod = true
+                    local amount = getStackCount(stack)
+                    counts[id] = (counts[id] or 0) + amount
+                    total = total + amount
+                    local ms = getStackMaxSize(stack)
+                    if ms and ms > maxStack then
+                        maxStack = ms
+                    end
+                end
+            end
+        end
+
+        return {
+            side = side,
+            slots = size,
+            maxStack = maxStack,
+            counts = counts,
+            total = total,
+            sawRod = sawRod,
+        }
+    end
+
+    -- если уже известна сторона буфера, используем её даже когда буфер пуст
+    if preferredSide ~= nil then
+        local r = scanSide(preferredSide)
+        if r and r.slots and r.slots > 0 then
+            local maxTotal = (r.slots or 0) * (r.maxStack or 1)
+            return r.counts, r.total, maxTotal, r.side, r.slots, r.maxStack
+        end
+    end
+
+    -- иначе ищем сторону где реально лежат стержни
+    local best = nil
+    for side = 0, 5 do
+        local r = scanSide(side)
+        if r then
+            if r.sawRod then
+                if not best or (r.total > best.total) or (r.total == best.total and r.slots > best.slots) then
+                    best = r
+                end
+            end
+        end
+    end
+
+    if best then
+        local maxTotal = (best.slots or 0) * (best.maxStack or 1)
+        return best.counts, best.total, maxTotal, best.side, best.slots, best.maxStack
+    end
+
+    return nil
+end
+
 local function countRodsFromStatus(proxy)
     local rods = safeCallwg(proxy, "getAllFuelRodsStatus", nil)
     if type(rods) ~= "table" then
@@ -1629,40 +1736,47 @@ local function updateRodData(num)
         local totalCount = 0
         if proxy then
             reactor_level[i] = getReactorLevel(proxy) or 1
-            -- Стержни считаем по буферным слотам (предметы с прочностью).
-            -- getAllFuelRodsStatus() показывает другой набор слотов и тут не подходит.
-            local invCounts, invTotal, invMax = countRodsFromInventory(proxy)
-            if invCounts == nil or (invTotal or 0) == 0 then
-                local aidx = reactor_adapter_index[i]
-                if aidx and adapters_proxy[aidx] then
-                    invCounts, invTotal, invMax = countRodsFromInventoryAllSides(adapters_proxy[aidx])
+            -- Стержни считаем через адаптер (буфер справа). Запоминаем сторону, слоты и максимальный стак,
+            -- чтобы корректно показывать 0/Max когда стержни выработались.
+            local aidx = reactor_adapter_index[i]
+            if aidx and adapters_proxy[aidx] then
+                local c, t, m, side, slots, maxStack = countRodBufferFromAdapter(
+                    adapters_proxy[aidx],
+                    reactor_rods_side[i],
+                    reactor_rods_stackMax[i]
+                )
+                if c ~= nil and (m or 0) > 0 then
+                    counts, totalCount, maxCount = c, t or 0, m or 0
+                    reactor_rods_side[i] = side
+                    reactor_rods_slots[i] = slots
+                    reactor_rods_stackMax[i] = maxStack
                 end
             end
-            if invCounts == nil or (invTotal or 0) == 0 then
-                if #adapters_proxy > 0 then
-                    local foundCounts = nil
-                    local foundTotal = 0
-                    local foundMax = 0
-                    local foundIndex = nil
-                    local foundCount = 0
-                    for aidx, aproxy in ipairs(adapters_proxy) do
-                        local c, t, m = countRodsFromInventoryAllSides(aproxy)
-                        if type(c) == "table" and (t or 0) > 0 then
-                            foundCount = foundCount + 1
-                            foundCounts = c
-                            foundTotal = t or 0
-                            foundMax = m or 0
-                            foundIndex = aidx
-                        end
-                    end
-                    if foundCount == 1 then
-                        reactor_adapter_index[i] = foundIndex
-                        invCounts, invTotal, invMax = foundCounts, foundTotal, foundMax
+
+            if (maxCount or 0) <= 0 and #adapters_proxy > 0 then
+                local foundCounts, foundTotal, foundMax, foundSide, foundSlots, foundStack = nil, 0, 0, nil, nil, nil
+                local foundIndex = nil
+                local foundCount = 0
+                for idx, aproxy in ipairs(adapters_proxy) do
+                    local c, t, m, side, slots, maxStack = countRodBufferFromAdapter(
+                        aproxy,
+                        reactor_rods_side[i],
+                        reactor_rods_stackMax[i]
+                    )
+                    if c ~= nil and (m or 0) > 0 then
+                        foundCount = foundCount + 1
+                        foundCounts, foundTotal, foundMax = c, t or 0, m or 0
+                        foundSide, foundSlots, foundStack = side, slots, maxStack
+                        foundIndex = idx
                     end
                 end
-            end
-            if invCounts ~= nil and (invMax or 0) > 0 then
-                counts, totalCount, maxCount = invCounts, invTotal or 0, invMax or 0
+                if foundCount == 1 then
+                    reactor_adapter_index[i] = foundIndex
+                    counts, totalCount, maxCount = foundCounts, foundTotal, foundMax
+                    reactor_rods_side[i] = foundSide
+                    reactor_rods_slots[i] = foundSlots
+                    reactor_rods_stackMax[i] = foundStack
+                end
             end
         end
         reactor_rod_counts[i] = counts or {}
@@ -1673,12 +1787,12 @@ local function updateRodData(num)
         else
             reactor_rod_types[i] = formatRodTypes(counts)
         end
-        if counts == nil then
+        if (maxCount or 0) > 0 then
+            reactor_rod_count[i] = totalCount or 0
+            reactor_rod_max[i] = maxCount
+        else
             reactor_rod_count[i] = nil
             reactor_rod_max[i] = nil
-        else
-            reactor_rod_count[i] = totalCount
-            reactor_rod_max[i] = maxCount
         end
     end
 end
