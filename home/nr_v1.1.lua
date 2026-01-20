@@ -1532,7 +1532,67 @@ local function decodeKvArray(t)
     return m
 end
 
+local function extractCountFromKv(kv)
+    if type(kv) ~= "table" then
+        return nil
+    end
+    return tonumber(
+        kv.count or kv.size or kv.amount or kv.qty or kv.stack or kv.stackSize or kv.stack_size or kv.items
+    )
+end
+
+local function getFuelRodsFromSelectStatus(proxy)
+    -- Пытаемся получить состояние по каждому "индексу стержня".
+    -- На практике метод есть в htc_reactors и требует integer index.
+    if not proxy or not proxy.getSelectStatusRod then
+        return nil
+    end
+
+    local agg = {}
+    local any = false
+    for idx = 1, 64 do
+        local rod = safeCallwg(proxy, "getSelectStatusRod", nil, idx)
+        if type(rod) == "table" then
+            local kv = decodeKvArray(rod) or {}
+            local itemId = tostring(kv.item or rod.itemName or rod.item or rod.name or "")
+            if itemId == "" or itemId == "nil" then
+                itemId = tostring(extractFirstStringWithColon(rod) or "unknown")
+            end
+
+            -- Если мод отдаёт stack-size (1..6), обычно это будет count/size/amount.
+            local cnt = extractCountFromKv(kv)
+            if not cnt or cnt <= 0 then
+                cnt = 1
+            end
+
+            local fuel = tonumber(kv.fuel or rod.fuel)
+            local maxFuel = tonumber(kv.maxFuel or rod.maxFuel)
+            local pct = nil
+            if fuel and maxFuel and maxFuel > 0 then
+                pct = fuel / maxFuel
+            end
+
+            -- Если слот пустой, в некоторых реализациях item может быть nil/"" — пропускаем такие.
+            if itemId ~= "" and itemId ~= "nil" and itemId ~= "unknown" then
+                addFuelRodAggPercent(agg, itemId, cnt, pct)
+                any = true
+            end
+        end
+    end
+
+    if any and next(agg) ~= nil then
+        return agg
+    end
+    return nil
+end
+
 local function getFuelRodsFromStatus(proxy)
+    -- Самая точная попытка: поиндексно через getSelectStatusRod (если отдаёт stack-size).
+    local byIdx = getFuelRodsFromSelectStatus(proxy)
+    if byIdx and next(byIdx) ~= nil then
+        return byIdx
+    end
+
     local rods = safeCallwg(proxy, "getAllFuelRodsStatus", nil)
     if type(rods) ~= "table" or #rods == 0 then
         return nil
@@ -3278,6 +3338,7 @@ local function handleChatCommand(nick, msg, args)
 
         -- Попробуем вызвать самые вероятные методы без аргументов
         tryCallInterestingMethodsToChat("htc_reactors", reactorProxy, {"rod", "fuel", "slot"}, 6)
+        chatBox.say("§7Подсказка: метод §egetSelectStatusRod(index)§7 требует число. Пример индексов: 1..64.")
 
     elseif msg:match("^@start") then
         local num = tonumber(args:match("^(%d+)"))
