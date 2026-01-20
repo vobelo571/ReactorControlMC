@@ -608,266 +608,6 @@ local function initMe()
     return current_me_address
 end
 
-local function meGetItems()
-    if not me_proxy then
-        return {}
-    end
-    local items = safeCall(me_proxy, "getItemsInNetwork", nil)
-    if type(items) == "table" then
-        return items
-    end
-    return {}
-end
-
-local function meGetCraftables()
-    if not me_proxy then
-        return {}
-    end
-    local craftables = safeCall(me_proxy, "getCraftables", nil)
-    if type(craftables) == "table" then
-        return craftables
-    end
-    return {}
-end
-
-local function meGetCraftableId(craftable)
-    if type(craftable) ~= "table" then
-        return nil
-    end
-    if type(craftable.getItemStack) == "function" then
-        local ok, stack = pcall(craftable.getItemStack, craftable)
-        if ok and type(stack) == "table" then
-            return stack.name or stack.id or stack.label
-        end
-    end
-    return craftable.name or craftable.id or craftable.label
-end
-
-local function meFindCraftable(id)
-    if type(id) ~= "string" or id == "" then
-        return nil
-    end
-    for _, craftable in ipairs(meGetCraftables()) do
-        local craftId = meGetCraftableId(craftable)
-        if craftId == id then
-            return craftable
-        end
-    end
-    return nil
-end
-
-local function meRequestCrafting(id, count)
-    local craftable = meFindCraftable(id)
-    if not craftable then
-        return nil, "Шаблон не найден"
-    end
-    count = tonumber(count) or 1
-
-    if type(craftable.requestCrafting) == "function" then
-        local ok, job = pcall(craftable.requestCrafting, craftable, count)
-        if ok then
-            return job, nil
-        end
-    end
-    if type(craftable.request) == "function" then
-        local ok, job = pcall(craftable.request, craftable, count)
-        if ok then
-            return job, nil
-        end
-    end
-    if type(me_proxy.requestCrafting) == "function" then
-        local ok, job = pcall(me_proxy.requestCrafting, me_proxy, {name = id, count = count})
-        if ok then
-            return job, nil
-        end
-    end
-    return nil, "Ошибка запроса"
-end
-
-local function meGetJobState(job)
-    if not job then
-        return nil, nil
-    end
-    local done = nil
-    local canceled = nil
-    if type(job.isDone) == "function" then
-        local ok, result = pcall(job.isDone, job)
-        if ok then done = result end
-    end
-    if type(job.isCanceled) == "function" then
-        local ok, result = pcall(job.isCanceled, job)
-        if ok then canceled = result end
-    end
-    return done, canceled
-end
-
-local function safeMeTick()
-    local ok = pcall(function()
-        mePollOrders()
-        for i = 1, reactors do
-            maybeOrderReactorRods(i)
-        end
-    end)
-    if not ok then
-        me_last_error = "ME: ошибка"
-    end
-end
-
-local function updatePerfStats(dt)
-    if type(dt) ~= "number" then
-        return
-    end
-    perf_samples = perf_samples + 1
-    perf_avg_loop = perf_avg_loop + (dt - perf_avg_loop) / perf_samples
-    if dt > perf_max_loop then
-        perf_max_loop = dt
-    end
-end
-
-local function getPreferredRodId(i)
-    local counts = reactor_rod_counts[i]
-    if type(counts) == "table" then
-        local bestId = nil
-        local bestCount = 0
-        for id, count in pairs(counts) do
-            local num = tonumber(count) or 0
-            if id ~= UNKNOWN_ROD_ID and rod_types[id] and num > bestCount then
-                bestId = id
-                bestCount = num
-            end
-        end
-        if bestId then
-            return bestId
-        end
-    end
-    local label = reactor_rod_types[i]
-    if label and rod_label_to_id[label] then
-        return rod_label_to_id[label]
-    end
-    return nil
-end
-
-local function runMeTestScenarios()
-    message("ME тест: запуск диагностики...", colors.textclr, 34)
-    if not me_network or not me_proxy then
-        message("ME тест: МЭ не подключена", colors.msgerror, 34)
-        return
-    end
-
-    local rodIds = {}
-    for i = 1, reactors do
-        local rodId = getPreferredRodId(i)
-        if rodId then
-            rodIds[rodId] = true
-        end
-    end
-
-    local missing = 0
-    local checked = 0
-    for rodId, _ in pairs(rodIds) do
-        local meId = me_rod_map[rodId] or rodId
-        checked = checked + 1
-        if not meFindCraftable(meId) then
-            missing = missing + 1
-            message("ME тест: нет шаблона для " .. tostring(meId), colors.msgwarn, 34)
-        end
-        local minCount = me_min_order[rodId] or me_default_min_order or 0
-        local maxCount = me_max_order[rodId] or me_default_max_order or 0
-        if maxCount > 0 and minCount > maxCount then
-            message("ME тест: min>max для " .. tostring(rodId), colors.msgwarn, 34)
-        end
-    end
-
-    if checked == 0 then
-        message("ME тест: нет данных по стержням", colors.msgwarn, 34)
-    elseif missing == 0 then
-        message("ME тест: шаблоны OK (" .. checked .. ")", colors.msginfo, 34)
-    end
-
-    local avgMs = math.floor((perf_avg_loop or 0) * 1000 + 0.5)
-    local maxMs = math.floor((perf_max_loop or 0) * 1000 + 0.5)
-    message("ME тест: цикл " .. avgMs .. "ms avg / " .. maxMs .. "ms max", colors.textclr, 34)
-end
-
-local function meEnqueueOrder(rodId, count, reactorIndex)
-    if not me_network or not me_proxy then
-        me_last_error = "МЭ не подключена"
-        return nil
-    end
-    local job, err = meRequestCrafting(rodId, count)
-    if not job then
-        me_last_error = err or "Ошибка запроса"
-        return nil
-    end
-    local order = {
-        id = rodId,
-        count = count,
-        job = job,
-        reactor = reactorIndex,
-        created_at = computer.uptime(),
-    }
-    table.insert(me_orders, order)
-    me_last_error = nil
-    return order
-end
-
-local function mePollOrders()
-    for idx = #me_orders, 1, -1 do
-        local order = me_orders[idx]
-        local done, canceled = meGetJobState(order.job)
-        if done or canceled then
-            table.remove(me_orders, idx)
-            if order.reactor then
-                reactor_order_pending[order.reactor] = nil
-            end
-            if canceled then
-                me_last_error = "Заказ отменён"
-            end
-        end
-    end
-end
-
-local function maybeOrderReactorRods(i)
-    if not me_network or not me_proxy then
-        me_last_error = "МЭ не подключена"
-        return
-    end
-    local state = reactor_state[i]
-    if not state or not state.fully_depleted then
-        return
-    end
-    if reactor_order_pending[i] then
-        return
-    end
-    local now = computer.uptime()
-    if reactor_order_last[i] and (now - reactor_order_last[i]) < ME_ORDER_DEBOUNCE then
-        return
-    end
-    local rodId = getPreferredRodId(i)
-    local count = state.rod_max or reactor_rod_max[i] or 0
-    if not rodId or count <= 0 then
-        me_last_error = "Неизв. стержни"
-        return
-    end
-    local meId = me_rod_map[rodId] or rodId
-    local minCount = me_min_order[rodId] or me_default_min_order or 0
-    local maxCount = me_max_order[rodId] or me_default_max_order or 0
-    if count < minCount then
-        count = minCount
-    end
-    if maxCount > 0 and count > maxCount then
-        count = maxCount
-    end
-    if count <= 0 then
-        return
-    end
-    local order = meEnqueueOrder(meId, count, i)
-    if order then
-        reactor_order_pending[i] = order
-        reactor_order_last[i] = now
-    end
-end
-
 local function initChatBox()
     isChatBox = component.isAvailable("chat_box") or false
     if isChatBox then
@@ -1514,6 +1254,266 @@ local function safeCall(proxy, method, default, ...)
         end
     end
     return default
+end
+
+local function meGetItems()
+    if not me_proxy then
+        return {}
+    end
+    local items = safeCall(me_proxy, "getItemsInNetwork", nil)
+    if type(items) == "table" then
+        return items
+    end
+    return {}
+end
+
+local function meGetCraftables()
+    if not me_proxy then
+        return {}
+    end
+    local craftables = safeCall(me_proxy, "getCraftables", nil)
+    if type(craftables) == "table" then
+        return craftables
+    end
+    return {}
+end
+
+local function meGetCraftableId(craftable)
+    if type(craftable) ~= "table" then
+        return nil
+    end
+    if type(craftable.getItemStack) == "function" then
+        local ok, stack = pcall(craftable.getItemStack, craftable)
+        if ok and type(stack) == "table" then
+            return stack.name or stack.id or stack.label
+        end
+    end
+    return craftable.name or craftable.id or craftable.label
+end
+
+local function meFindCraftable(id)
+    if type(id) ~= "string" or id == "" then
+        return nil
+    end
+    for _, craftable in ipairs(meGetCraftables()) do
+        local craftId = meGetCraftableId(craftable)
+        if craftId == id then
+            return craftable
+        end
+    end
+    return nil
+end
+
+local function meRequestCrafting(id, count)
+    local craftable = meFindCraftable(id)
+    if not craftable then
+        return nil, "Шаблон не найден"
+    end
+    count = tonumber(count) or 1
+
+    if type(craftable.requestCrafting) == "function" then
+        local ok, job = pcall(craftable.requestCrafting, craftable, count)
+        if ok then
+            return job, nil
+        end
+    end
+    if type(craftable.request) == "function" then
+        local ok, job = pcall(craftable.request, craftable, count)
+        if ok then
+            return job, nil
+        end
+    end
+    if type(me_proxy.requestCrafting) == "function" then
+        local ok, job = pcall(me_proxy.requestCrafting, me_proxy, {name = id, count = count})
+        if ok then
+            return job, nil
+        end
+    end
+    return nil, "Ошибка запроса"
+end
+
+local function meGetJobState(job)
+    if not job then
+        return nil, nil
+    end
+    local done = nil
+    local canceled = nil
+    if type(job.isDone) == "function" then
+        local ok, result = pcall(job.isDone, job)
+        if ok then done = result end
+    end
+    if type(job.isCanceled) == "function" then
+        local ok, result = pcall(job.isCanceled, job)
+        if ok then canceled = result end
+    end
+    return done, canceled
+end
+
+local function updatePerfStats(dt)
+    if type(dt) ~= "number" then
+        return
+    end
+    perf_samples = perf_samples + 1
+    perf_avg_loop = perf_avg_loop + (dt - perf_avg_loop) / perf_samples
+    if dt > perf_max_loop then
+        perf_max_loop = dt
+    end
+end
+
+local function getPreferredRodId(i)
+    local counts = reactor_rod_counts[i]
+    if type(counts) == "table" then
+        local bestId = nil
+        local bestCount = 0
+        for id, count in pairs(counts) do
+            local num = tonumber(count) or 0
+            if id ~= UNKNOWN_ROD_ID and rod_types[id] and num > bestCount then
+                bestId = id
+                bestCount = num
+            end
+        end
+        if bestId then
+            return bestId
+        end
+    end
+    local label = reactor_rod_types[i]
+    if label and rod_label_to_id[label] then
+        return rod_label_to_id[label]
+    end
+    return nil
+end
+
+local function meEnqueueOrder(rodId, count, reactorIndex)
+    if not me_network or not me_proxy then
+        me_last_error = "МЭ не подключена"
+        return nil
+    end
+    local job, err = meRequestCrafting(rodId, count)
+    if not job then
+        me_last_error = err or "Ошибка запроса"
+        return nil
+    end
+    local order = {
+        id = rodId,
+        count = count,
+        job = job,
+        reactor = reactorIndex,
+        created_at = computer.uptime(),
+    }
+    table.insert(me_orders, order)
+    me_last_error = nil
+    return order
+end
+
+local function mePollOrders()
+    for idx = #me_orders, 1, -1 do
+        local order = me_orders[idx]
+        local done, canceled = meGetJobState(order.job)
+        if done or canceled then
+            table.remove(me_orders, idx)
+            if order.reactor then
+                reactor_order_pending[order.reactor] = nil
+            end
+            if canceled then
+                me_last_error = "Заказ отменён"
+            end
+        end
+    end
+end
+
+local function maybeOrderReactorRods(i)
+    if not me_network or not me_proxy then
+        me_last_error = "МЭ не подключена"
+        return
+    end
+    local state = reactor_state[i]
+    if not state or not state.fully_depleted then
+        return
+    end
+    if reactor_order_pending[i] then
+        return
+    end
+    local now = computer.uptime()
+    if reactor_order_last[i] and (now - reactor_order_last[i]) < ME_ORDER_DEBOUNCE then
+        return
+    end
+    local rodId = getPreferredRodId(i)
+    local count = state.rod_max or reactor_rod_max[i] or 0
+    if not rodId or count <= 0 then
+        me_last_error = "Неизв. стержни"
+        return
+    end
+    local meId = me_rod_map[rodId] or rodId
+    local minCount = me_min_order[rodId] or me_default_min_order or 0
+    local maxCount = me_max_order[rodId] or me_default_max_order or 0
+    if count < minCount then
+        count = minCount
+    end
+    if maxCount > 0 and count > maxCount then
+        count = maxCount
+    end
+    if count <= 0 then
+        return
+    end
+    local order = meEnqueueOrder(meId, count, i)
+    if order then
+        reactor_order_pending[i] = order
+        reactor_order_last[i] = now
+    end
+end
+
+local function safeMeTick()
+    local ok = pcall(function()
+        mePollOrders()
+        for i = 1, reactors do
+            maybeOrderReactorRods(i)
+        end
+    end)
+    if not ok then
+        me_last_error = "ME: ошибка"
+    end
+end
+
+local function runMeTestScenarios()
+    message("ME тест: запуск диагностики...", colors.textclr, 34)
+    if not me_network or not me_proxy then
+        message("ME тест: МЭ не подключена", colors.msgerror, 34)
+        return
+    end
+
+    local rodIds = {}
+    for i = 1, reactors do
+        local rodId = getPreferredRodId(i)
+        if rodId then
+            rodIds[rodId] = true
+        end
+    end
+
+    local missing = 0
+    local checked = 0
+    for rodId, _ in pairs(rodIds) do
+        local meId = me_rod_map[rodId] or rodId
+        checked = checked + 1
+        if not meFindCraftable(meId) then
+            missing = missing + 1
+            message("ME тест: нет шаблона для " .. tostring(meId), colors.msgwarn, 34)
+        end
+        local minCount = me_min_order[rodId] or me_default_min_order or 0
+        local maxCount = me_max_order[rodId] or me_default_max_order or 0
+        if maxCount > 0 and minCount > maxCount then
+            message("ME тест: min>max для " .. tostring(rodId), colors.msgwarn, 34)
+        end
+    end
+
+    if checked == 0 then
+        message("ME тест: нет данных по стержням", colors.msgwarn, 34)
+    elseif missing == 0 then
+        message("ME тест: шаблоны OK (" .. checked .. ")", colors.msginfo, 34)
+    end
+
+    local avgMs = math.floor((perf_avg_loop or 0) * 1000 + 0.5)
+    local maxMs = math.floor((perf_max_loop or 0) * 1000 + 0.5)
+    message("ME тест: цикл " .. avgMs .. "ms avg / " .. maxMs .. "ms max", colors.textclr, 34)
 end
 
 local function extractRodId(rod)
