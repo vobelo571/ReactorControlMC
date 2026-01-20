@@ -1610,79 +1610,41 @@ local function updateRodData(num)
         if proxy then
             reactor_level[i] = getReactorLevel(proxy) or 1
             counts, totalCount, maxCount = countRodsFromStatus(proxy)
-            local invCounts, invTotal, invMax = countRodsFromInventory(proxy)
-            if invCounts == nil or (invTotal or 0) == 0 then
-                local aidx = reactor_adapter_index[i]
-                if aidx and adapters_proxy[aidx] then
-                    invCounts, invTotal, invMax = countRodsFromInventoryAllSides(adapters_proxy[aidx])
+            if counts == nil then
+                local invCounts, invTotal, invMax = countRodsFromInventory(proxy)
+                if invCounts == nil or (invTotal or 0) == 0 then
+                    local aidx = reactor_adapter_index[i]
+                    if aidx and adapters_proxy[aidx] then
+                        invCounts, invTotal, invMax = countRodsFromInventoryAllSides(adapters_proxy[aidx])
+                    end
                 end
-            end
-            if invCounts == nil or (invTotal or 0) == 0 then
-                if #adapters_proxy > 0 then
-                    local foundCounts = nil
-                    local foundTotal = 0
-                    local foundMax = 0
-                    local foundIndex = nil
-                    local foundCount = 0
-                    for aidx, aproxy in ipairs(adapters_proxy) do
-                        local c, t, m = countRodsFromInventoryAllSides(aproxy)
-                        if type(c) == "table" and (t or 0) > 0 then
-                            foundCount = foundCount + 1
-                            foundCounts = c
-                            foundTotal = t or 0
-                            foundMax = m or 0
-                            foundIndex = aidx
+                if invCounts == nil or (invTotal or 0) == 0 then
+                    if #adapters_proxy > 0 then
+                        local foundCounts = nil
+                        local foundTotal = 0
+                        local foundMax = 0
+                        local foundIndex = nil
+                        local foundCount = 0
+                        for aidx, aproxy in ipairs(adapters_proxy) do
+                            local c, t, m = countRodsFromInventoryAllSides(aproxy)
+                            if type(c) == "table" and (t or 0) > 0 then
+                                foundCount = foundCount + 1
+                                foundCounts = c
+                                foundTotal = t or 0
+                                foundMax = m or 0
+                                foundIndex = aidx
+                            end
+                        end
+                        if foundCount == 1 then
+                            reactor_adapter_index[i] = foundIndex
+                            invCounts, invTotal, invMax = foundCounts, foundTotal, foundMax
                         end
                     end
-                    if foundCount == 1 then
-                        reactor_adapter_index[i] = foundIndex
-                        invCounts, invTotal, invMax = foundCounts, foundTotal, foundMax
-                    end
+                end
+                if invCounts ~= nil and (invTotal or 0) > 0 then
+                    counts, totalCount, maxCount = invCounts, invTotal, invMax
                 end
             end
-            if invCounts ~= nil and (invTotal or 0) > 0 then
-                counts, totalCount, maxCount = invCounts, invTotal, invMax
-            end
-            if counts == nil or (next(counts) == nil and (totalCount or 0) == 0) then
-                counts, totalCount, maxCount = countRodsFromInventory(proxy)
-            end
-            if counts == nil or (next(counts) == nil and (totalCount or 0) == 0) then
-                local aidx = reactor_adapter_index[i]
-                if aidx and adapters_proxy[aidx] then
-                    counts, totalCount, maxCount = countRodsFromInventoryAllSides(adapters_proxy[aidx])
-                end
-            end
-            if (counts == nil or (next(counts) == nil and (totalCount or 0) == 0)) and #adapters_proxy > 0 then
-                local foundCounts = nil
-                local foundTotal = 0
-                local foundMax = 0
-                local foundIndex = nil
-                local foundCount = 0
-                for aidx, aproxy in ipairs(adapters_proxy) do
-                    local c, t, m = countRodsFromInventoryAllSides(aproxy)
-                    if type(c) == "table" and next(c) ~= nil then
-                        foundCount = foundCount + 1
-                        foundCounts = c
-                        foundTotal = t or 0
-                        foundMax = m or 0
-                        foundIndex = aidx
-                    end
-                end
-                if foundCount == 1 then
-                    reactor_adapter_index[i] = foundIndex
-                    counts, totalCount, maxCount = foundCounts, foundTotal, foundMax
-                end
-            end
-        end
-        local lvl = reactor_level[i] or 1
-        if lvl > 1 and (totalCount or 0) > 0 then
-            if type(counts) == "table" then
-                for id, c in pairs(counts) do
-                    counts[id] = (tonumber(c) or 0) * lvl
-                end
-            end
-            totalCount = (tonumber(totalCount) or 0) * lvl
-            maxCount = (tonumber(maxCount) or 0) * lvl
         end
         reactor_rod_counts[i] = counts or {}
         reactor_rod_summary[i] = formatRodCounts(counts)
