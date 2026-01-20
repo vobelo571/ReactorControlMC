@@ -816,11 +816,9 @@ local function formatRFwidgets(value)
 end
 
 local function getRodTotalSlotsByLevel(level)
-    -- Количество "ячеек" под стержни (в твоём интерфейсе: 20 мест, часть может быть пустой).
-    -- Реальное количество стержней = ячейки * уровень реактора.
-    -- Если на твоём сервере это отличается — скажи, подстроим.
-    local lvl = tonumber(level)
-    if lvl and lvl >= 1 then
+    -- Из наблюдений: уровень 6 = 20 ячеек.
+    -- Для остальных уровней точное количество API не отдаёт.
+    if tonumber(level) == 6 then
         return 20
     end
     return nil
@@ -954,16 +952,11 @@ local function drawWidgets()
             buffer.drawText(x + 6,  y + 1,  colors.textclr, "Реактор #" .. i)
             buffer.drawText(x + 4,  y + 2,  colors.textclr, "Нагрев: " .. (temperature[i] or "-") .. "°C")
             buffer.drawText(x + 4,  y + 3,  colors.textclr, formatRFwidgets(reactor_rf[i]))
-            local cellsFilled = tonumber(reactor_rods_filled[i]) or 0
-            local cellsTotal = reactor_rods_total[i]
-            local lvl = tonumber(reactor_level[i]) or 1
-            if lvl < 1 then lvl = 1 end
-
-            local rodsFilled = cellsFilled * lvl
-            local rodsLine = "Стержни: " .. tostring(rodsFilled)
-            if type(cellsTotal) == "number" and cellsTotal > 0 then
-                local rodsTotal = cellsTotal * lvl
-                rodsLine = rodsLine .. "/" .. tostring(rodsTotal)
+            local filled = tonumber(reactor_rods_filled[i]) or 0
+            local total = reactor_rods_total[i]
+            local rodsLine = "Стержни: " .. tostring(filled)
+            if type(total) == "number" and total > 0 then
+                rodsLine = rodsLine .. "/" .. tostring(total)
             end
             buffer.drawText(x + 4,  y + 4,  colors.textclr, rodsLine)
             buffer.drawText(x + 4,  y + 5,  colors.textclr, "Топливо: " .. tostring(reactor_rods_type[i] or "-"))
