@@ -1237,17 +1237,40 @@ local function extractRodId(rod)
 
     local function safeIndex(obj, key)
         local ok, v = pcall(function() return obj[key] end)
-        if ok then return v end
+        if not ok then return nil end
+        if type(v) == "function" then
+            local ok2, v2 = pcall(v, obj)
+            if ok2 then return v2 end
+            return nil
+        end
+        return v
+    end
+
+    local function safeCallMethod(obj, name)
+        local fn = safeIndex(obj, name)
+        if type(fn) == "function" then
+            local ok, v = pcall(fn, obj)
+            if ok then return v end
+        end
         return nil
     end
 
     local direct = {
+        tostring(rod),
         safeIndex(rod, "name"),
+        safeIndex(rod, "label"),
         safeIndex(rod, "id"),
         safeIndex(rod, "item"),
         safeIndex(rod, "itemName"),
         safeIndex(rod, "itemId"),
         safeIndex(rod, "type"),
+        safeIndex(rod, "unlocalizedName"),
+        safeCallMethod(rod, "name"),
+        safeCallMethod(rod, "label"),
+        safeCallMethod(rod, "id"),
+        safeCallMethod(rod, "getName"),
+        safeCallMethod(rod, "getLabel"),
+        safeCallMethod(rod, "getId"),
         safeIndex(rod, 1),
         safeIndex(rod, 2),
         safeIndex(rod, 3),
@@ -1371,11 +1394,27 @@ end
 
 local function getStackCount(stack)
     local count = tonumber(stack.size) or tonumber(stack.count) or 1
+    if type(stack.size) == "function" then
+        local ok, v = pcall(stack.size, stack)
+        if ok and tonumber(v) then count = tonumber(v) end
+    end
+    if type(stack.count) == "function" then
+        local ok, v = pcall(stack.count, stack)
+        if ok and tonumber(v) then count = tonumber(v) end
+    end
     return math.max(count, 1)
 end
 
 local function getStackMaxSize(stack)
     local maxSize = tonumber(stack.maxSize) or tonumber(stack.max_size) or tonumber(stack.maxStackSize) or tonumber(stack.max_stack_size) or tonumber(stack.maxCount) or tonumber(stack.max_count)
+    if type(stack.maxSize) == "function" then
+        local ok, v = pcall(stack.maxSize, stack)
+        if ok and tonumber(v) then maxSize = tonumber(v) end
+    end
+    if type(stack.maxStackSize) == "function" then
+        local ok, v = pcall(stack.maxStackSize, stack)
+        if ok and tonumber(v) then maxSize = tonumber(v) end
+    end
     if maxSize and maxSize > 0 then
         return maxSize
     end
@@ -1393,6 +1432,10 @@ local function isFuelRodStack(stack)
     if rod_types[id] then
         return true, id
     end
+    local low = tostring(id):lower()
+    if (low:find("fuel") and low:find("rod")) or low:find("fuel_rod") or low:find("fuelrod") or low:find("rod") then
+        return true, id
+    end
     return false, nil
 end
 
@@ -1401,8 +1444,15 @@ local function countRodBufferFromAdapter(adapterProxy, preferredSide, fallbackMa
         return nil
     end
 
+    local function getInvSize(side)
+        if side == nil then
+            return safeCall(adapterProxy, "getInventorySize", nil)
+        end
+        return safeCall(adapterProxy, "getInventorySize", nil, side)
+    end
+
     local function scanSide(side)
-        local size = safeCall(adapterProxy, "getInventorySize", nil, side)
+        local size = getInvSize(side)
         if type(size) ~= "number" or size <= 0 then
             return nil
         end
@@ -1438,6 +1488,13 @@ local function countRodBufferFromAdapter(adapterProxy, preferredSide, fallbackMa
             total = total,
             sawRod = sawRod,
         }
+    end
+
+    -- сначала пробуем инвентарь без side (иногда именно так отдаёт адаптер)
+    local r0 = scanSide(nil)
+    if r0 and r0.sawRod then
+        local maxTotal = (r0.slots or 0) * (r0.maxStack or 1)
+        return r0.counts, r0.total, maxTotal, r0.side, r0.slots, r0.maxStack
     end
 
     -- если уже известна сторона буфера, используем её даже когда буфер пуст
@@ -1786,6 +1843,12 @@ local function updateRodData(num)
             reactor_rod_types[i] = fuelLabel or "Неизв."
         else
             reactor_rod_types[i] = formatRodTypes(counts)
+        end
+        if counts == nil then
+            local fuelLabel = getFuelTypeLabel(proxy)
+            if fuelLabel then
+                reactor_rod_types[i] = fuelLabel
+            end
         end
         if (maxCount or 0) > 0 then
             reactor_rod_count[i] = totalCount or 0
