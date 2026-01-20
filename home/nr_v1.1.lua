@@ -208,11 +208,33 @@ local rod_order = {
 local rod_aliases = {
     ["quad_uranium_fuel_rod"] = "htc_reactors:quad_uranium_fuel_rod",
     ["sixteen_uraium_fuel_rod"] = "htc_reactors:sixteen_uraium_fuel_rod",
+    ["sixteen_uranium_fuel_rod"] = "htc_reactors:sixteen_uraium_fuel_rod",
+    ["sixten_uranium_fuel_rod"] = "htc_reactors:sixteen_uraium_fuel_rod",
     ["quad_mox_fuel_rod"] = "htc_reactors:quad_mox_fuel_rod",
     ["sixteen_mox_fuel_rod"] = "htc_reactors:sixteen_mox_fuel_rod",
     ["quad_californium_fuel_rod"] = "htc_reactors:quad_californium_fuel_rod",
     ["quad_ksirviz_fuel_rod"] = "htc_reactors:quad_ksirviz_fuel_rod",
 }
+
+local function canonicalizeRodId(id)
+    if type(id) ~= "string" then
+        return nil
+    end
+    local lower = id:lower()
+    if lower:find("containment_reactor_casing") or lower:find("containment_reacor_casing") then
+        return nil
+    end
+    if not lower:find("fuel_rod") then
+        return nil
+    end
+    if lower:find("^htc_reactor:") then
+        return "htc_reactors:" .. id:sub(#"htc_reactor:" + 1)
+    end
+    if lower:find("^htc_reactors:") then
+        return id
+    end
+    return nil
+end
 
 local function brailleChar(dots)
     return unicode.char(
@@ -1259,16 +1281,22 @@ local function extractRodId(rod)
             return nil
         end
         if value:find(":") then
-            return value
+            return canonicalizeRodId(value)
         end
         local key = value:lower()
         key = key:gsub("%s+", "_")
         key = key:gsub("[-]", "_")
+        if key:find("casing") or key:find("обшив") or key:find("обшивк") then
+            return nil
+        end
         if rod_aliases[key] then
             return rod_aliases[key]
         end
+        if not (key:find("fuel") or key:find("топлив") or key:find("fuel_rod") or key:find("fuelrod")) then
+            return nil
+        end
         local hasQuad = key:find("quad") or key:find("x4") or key:find("4x")
-        local hasSixteen = key:find("sixteen") or key:find("x16") or key:find("16x") or key:find("16")
+        local hasSixteen = key:find("sixteen") or key:find("sixten") or key:find("x16") or key:find("16x") or key:find("16")
         if key:find("uran") then
             return hasSixteen and "htc_reactors:sixteen_uraium_fuel_rod" or (hasQuad and "htc_reactors:quad_uranium_fuel_rod" or nil)
         end
@@ -1281,7 +1309,7 @@ local function extractRodId(rod)
         if key:find("ksir") or key:find("viz") then
             return "htc_reactors:quad_ksirviz_fuel_rod"
         end
-        if key:find("rod") or key:find("fuel_rod") or key:find("fuelrod") or key:find("стерж") or key:find("твэл") then
+        if key:find("fuel_rod") or key:find("fuelrod") then
             return UNKNOWN_ROD_ID
         end
         return nil
@@ -1645,6 +1673,16 @@ local function updateRodData(num)
                     counts, totalCount, maxCount = invCounts, invTotal, invMax
                 end
             end
+        end
+        local lvl = reactor_level[i] or 1
+        if lvl > 1 and (totalCount or 0) > 0 then
+            if type(counts) == "table" then
+                for id, c in pairs(counts) do
+                    counts[id] = (tonumber(c) or 0) * lvl
+                end
+            end
+            totalCount = (tonumber(totalCount) or 0) * lvl
+            maxCount = (tonumber(maxCount) or 0) * lvl
         end
         reactor_rod_counts[i] = counts or {}
         reactor_rod_summary[i] = formatRodCounts(counts)
