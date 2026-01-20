@@ -816,14 +816,12 @@ local function formatRFwidgets(value)
 end
 
 local function getRodTotalSlotsByLevel(level)
-    -- Общее количество позиций в сетке стержней в GUI.
-    -- ВАЖНО: внутри могут стоять "реакторные обшивки", их учитывать не нужно:
-    -- реальная ёмкость по стержням = (позиции, где реально может стоять стержень) * уровень.
-    -- Эти "позиции под стержни" мы берём из getSelectStatusRod (кол-во table-ответов).
-    -- Но если по какой-то причине API недоступен — fallback на 24.
+    -- Количество "ячеек" под стержни (в твоём интерфейсе: 20 мест, часть может быть пустой).
+    -- Реальное количество стержней = ячейки * уровень реактора.
+    -- Если на твоём сервере это отличается — скажи, подстроим.
     local lvl = tonumber(level)
     if lvl and lvl >= 1 then
-        return 24
+        return 20
     end
     return nil
 end
@@ -866,49 +864,26 @@ local function refreshReactorRodsInfo(i)
         return
     end
 
-    -- Для UI нам нужно:
-    -- 1) Сколько ячеек занято стержнями (filledCells)
-    -- 2) Сколько всего ячеек "под стержни" (totalCells) — без реакторных обшивок
-    -- 3) Основной тип топлива (по самому частому itemId)
-    local filledCells = 0
-    local totalCells = 0
-    local countsByItem = {}
-
-    if reactors_proxy[i] and reactors_proxy[i].getSelectStatusRod then
-        -- Индексация у драйвера может быть 0-based/1-based, поэтому сканируем 0..64.
-        for idx = 0, 64 do
-            local ok, rod = callMethodFlexible(reactors_proxy[i], "getSelectStatusRod", idx)
-            if ok and type(rod) == "table" then
-                totalCells = totalCells + 1
-                -- формат как key-value массив: {"item", "<id>", "type", "...", ...}
-                local itemId = nil
-                if rod[1] == "item" and type(rod[2]) == "string" then
-                    itemId = rod[2]
-                end
-                if itemId and itemId ~= "" and itemId ~= "nil" then
-                    filledCells = filledCells + 1
-                    countsByItem[itemId] = (countsByItem[itemId] or 0) + 1
-                end
+    local agg = nil
+    if getFuelRodsFromSelectStatus then
+        agg = getFuelRodsFromSelectStatus(reactors_proxy[i])
+    end
+    local filled = 0
+    local mainType = nil
+    local mainSlots = 0
+    if agg and next(agg) ~= nil then
+        for k, e in pairs(agg) do
+            local slots = tonumber(e.slots) or tonumber(e.count) or 0
+            filled = filled + slots
+            if slots > mainSlots then
+                mainSlots = slots
+                mainType = k
             end
         end
     end
 
-    if totalCells <= 0 then
-        -- fallback: если поиндексный API временно недоступен
-        totalCells = getRodTotalSlotsByLevel(reactor_level[i]) or 0
-    end
-
-    local mainType = nil
-    local mainSlots = 0
-    for itemId, n in pairs(countsByItem) do
-        if n > mainSlots then
-            mainSlots = n
-            mainType = itemId
-        end
-    end
-
-    reactor_rods_filled[i] = filledCells
-    reactor_rods_total[i] = totalCells
+    reactor_rods_filled[i] = filled
+    reactor_rods_total[i] = getRodTotalSlotsByLevel(reactor_level[i])
     reactor_rods_type[i] = mainType and formatFuelTypeName(mainType) or "-"
     reactor_rods_cache_at[i] = computer.uptime()
 end
