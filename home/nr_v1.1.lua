@@ -894,24 +894,19 @@ local function refreshReactorRodsInfo(i)
         end
     end
 
-    -- В твоей реализации getSelectStatusRod возвращает таблицы только для занятых ячеек,
-    -- поэтому totalCells часто == filledCells. Чтобы учитывать пустые "стержневые" ячейки
-    -- (и не считать обшивки), ведём кэш ёмкости: максимум наблюдавшихся занятых ячеек.
+    -- Кэш ёмкости: если таблицы приходят только для занятых ячеек,
+    -- сохраняем максимум наблюдавшихся стержневых ячеек.
     local cap = tonumber(reactor_rods_capacity[i]) or 0
-    local observed = tonumber(filledCells) or 0
-    if observed > cap then
-        cap = observed
+    if filledCells > cap then
+        cap = filledCells
         reactor_rods_capacity[i] = cap
     end
-
-    if cap <= 0 then
-        -- fallback: если поиндексный API недоступен или ещё ни разу не было стержней
-        -- показываем "как есть" (занято/занято), пока не накопим статистику по ёмкости
-        cap = observed
-        if cap <= 0 then
-            cap = getRodTotalSlotsByLevel(reactor_level[i]) or 0
-        end
-        reactor_rods_capacity[i] = cap
+    if cap > totalCells then
+        totalCells = cap
+    end
+    if totalCells <= 0 then
+        -- fallback: если поиндексный API временно недоступен
+        totalCells = getRodTotalSlotsByLevel(reactor_level[i]) or 0
     end
 
     local mainType = nil
@@ -924,7 +919,7 @@ local function refreshReactorRodsInfo(i)
     end
 
     reactor_rods_filled[i] = filledCells
-    reactor_rods_total[i] = cap
+    reactor_rods_total[i] = totalCells
     reactor_rods_type[i] = mainType and formatFuelTypeName(mainType) or "-"
     reactor_rods_cache_at[i] = computer.uptime()
 end
@@ -4073,17 +4068,9 @@ local function mainLoop()
     end
 
     if isChatBox then
-        -- thread/process могут падать assert'ом на некоторых сборках OC/серверных ядрах.
-        -- Никогда не роняем запуск из-за чат-потока: если не получилось — просто отключаем команды.
-        local okThread, threadLib = pcall(require, "thread")
-        if okThread and type(threadLib) == "table" and type(threadLib.create) == "function" and type(chatMessageHandler) == "function" then
-            local okCreate, th = pcall(threadLib.create, chatMessageHandler)
-            if okCreate and th ~= nil then
-                chatThread = th
-                message("Чат-бокс подключен! Список команд: @help", colors.msginfo)
-                chatBox.say("§2Чат-бокс подключен! §aСписок команд: @help")
-            end
-        end
+        chatThread = require("thread").create(chatMessageHandler)
+        message("Чат-бокс подключен! Список команд: @help", colors.msginfo)
+        chatBox.say("§2Чат-бокс подключен! §aСписок команд: @help")
     end
 
     if work == true then
