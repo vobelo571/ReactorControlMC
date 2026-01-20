@@ -824,19 +824,8 @@ local function getRodTotalSlotsByLevel(level)
     return nil
 end
 
-local function safeUptime()
-    if computer and type(computer.uptime) == "function" then
-        local ok, t = pcall(computer.uptime)
-        if ok and type(t) == "number" then
-            return t
-        end
-    end
-    local ok2, t2 = pcall(os.clock)
-    if ok2 and type(t2) == "number" then
-        return t2
-    end
-    return 0
-end
+-- forward declaration (UI uses it before definition later in file)
+local getFuelRodsFromSelectStatus
 
 local function formatFuelTypeName(itemId)
     itemId = tostring(itemId or "")
@@ -864,19 +853,19 @@ local function formatFuelTypeName(itemId)
     return short
 end
 
--- forward declaration (нужно для вызова из UI-функций выше по файлу)
-local getFuelRodsFromSelectStatus
-
 local function refreshReactorRodsInfo(i)
     if not reactors_proxy[i] then
         reactor_rods_filled[i] = 0
         reactor_rods_total[i] = getRodTotalSlotsByLevel(reactor_level[i])
         reactor_rods_type[i] = "-"
-        reactor_rods_cache_at[i] = safeUptime()
+        reactor_rods_cache_at[i] = computer.uptime()
         return
     end
 
-    local agg = getFuelRodsFromSelectStatus(reactors_proxy[i])
+    local agg = nil
+    if getFuelRodsFromSelectStatus then
+        agg = getFuelRodsFromSelectStatus(reactors_proxy[i])
+    end
     local filled = 0
     local mainType = nil
     local mainSlots = 0
@@ -894,11 +883,11 @@ local function refreshReactorRodsInfo(i)
     reactor_rods_filled[i] = filled
     reactor_rods_total[i] = getRodTotalSlotsByLevel(reactor_level[i])
     reactor_rods_type[i] = mainType and formatFuelTypeName(mainType) or "-"
-    reactor_rods_cache_at[i] = safeUptime()
+    reactor_rods_cache_at[i] = computer.uptime()
 end
 
 local function ensureReactorRodsInfoFresh(i)
-    local now = safeUptime()
+    local now = computer.uptime()
     local last = reactor_rods_cache_at[i]
     if type(last) ~= "number" or (now - last) >= 5 then
         local ok = pcall(refreshReactorRodsInfo, i)
