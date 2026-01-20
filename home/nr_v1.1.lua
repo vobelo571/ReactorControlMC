@@ -117,6 +117,7 @@ local chatThread = nil
 local chatCommands = {
     ["@help"] = true,
     ["@status"] = true,
+    ["@rods"] = true,
     ["@setporog"] = true,
     ["@start"] = true,
     ["@stop"] = true,
@@ -1198,6 +1199,123 @@ local function getAllStacks(proxy, side)
         return stacks
     end
     return nil
+end
+
+local function isFuelRodStack(stack)
+    if type(stack) ~= "table" then
+        return false
+    end
+    local name = tostring(stack.name or ""):lower()
+    local label = tostring(stack.label or ""):lower()
+    if name == "" and label == "" then
+        return false
+    end
+    -- мягкая эвристика: в модах стержни почти всегда содержат rod/fuel или "стерж" в label
+    if name:find("fuel", 1, true) or name:find("rod", 1, true) then
+        return true
+    end
+    if label:find("стерж", 1, true) or label:find("rod", 1, true) then
+        return true
+    end
+    return false
+end
+
+local function addFuelRodAgg(agg, key, addCount, stack)
+    if not key or key == "" then
+        key = "unknown"
+    end
+    addCount = tonumber(addCount) or 0
+    if addCount <= 0 then
+        addCount = 1
+    end
+    local e = agg[key]
+    if not e then
+        e = {count = 0, minP = nil, maxP = nil, sumP = 0, pN = 0}
+        agg[key] = e
+    end
+    e.count = e.count + addCount
+
+    -- если предмет отдаёт durability через damage/maxDamage — посчитаем сводку
+    if type(stack) == "table" then
+        local dmg = tonumber(stack.damage)
+        local maxDmg = tonumber(stack.maxDamage)
+        if dmg and maxDmg and maxDmg > 0 then
+            local p = math.max(0, math.min(1, 1 - (dmg / maxDmg)))
+            if e.minP == nil or p < e.minP then e.minP = p end
+            if e.maxP == nil or p > e.maxP then e.maxP = p end
+            e.sumP = e.sumP + p
+            e.pN = e.pN + 1
+        end
+    end
+end
+
+local function getFuelRodsFromInventory(proxy)
+    local size, side = getInventorySize(proxy)
+    if not size then
+        return nil
+    end
+
+    local agg = {}
+    local stacks = getAllStacks(proxy, side)
+    if stacks then
+        for slot = 1, size do
+            local stack = stacks[slot]
+            if isFuelRodStack(stack) then
+                addFuelRodAgg(agg, tostring(stack.name or stack.label or "unknown"), tonumber(stack.size) or 1, stack)
+            end
+        end
+        return agg
+    end
+
+    for slot = 1, size do
+        local stack = getStackInSlot(proxy, side, slot)
+        if isFuelRodStack(stack) then
+            addFuelRodAgg(agg, tostring(stack.name or stack.label or "unknown"), tonumber(stack.size) or 1, stack)
+        end
+    end
+    return agg
+end
+
+local function extractFirstStringWithColon(t)
+    if type(t) ~= "table" then
+        return nil
+    end
+    for _, v in pairs(t) do
+        if type(v) == "string" and v:find(":", 1, true) then
+            return v
+        end
+    end
+    return nil
+end
+
+local function getFuelRodsFromStatus(proxy)
+    local rods = safeCallwg(proxy, "getAllFuelRodsStatus", nil)
+    if type(rods) ~= "table" or #rods == 0 then
+        return nil
+    end
+    local agg = {}
+    for _, rod in ipairs(rods) do
+        if type(rod) == "table" then
+            local key = tostring(rod.name or rod.type or rod.itemName or rod.item or "")
+            if key == "" or key == "nil" then
+                key = tostring(extractFirstStringWithColon(rod) or "unknown")
+            end
+
+            local cnt = tonumber(rod.count or rod.size or rod.amount or rod.qty)
+            addFuelRodAgg(agg, key, cnt or 1, rod)
+        else
+            addFuelRodAgg(agg, "unknown", 1, nil)
+        end
+    end
+    return agg
+end
+
+local function getFuelRodsSummary(proxy)
+    local agg = getFuelRodsFromInventory(proxy)
+    if agg and next(agg) ~= nil then
+        return agg
+    end
+    return getFuelRodsFromStatus(proxy)
 end
 
 local function getReactorLevel(proxy)
@@ -2532,6 +2650,7 @@ local function handleChatCommand(nick, msg, args)
             chatBox.say("§a@useradd - добавить пользователя (пример: @useradd Ник)") -- Сделай
             chatBox.say("§a@userdel - удалить пользователя (пример: @userdel Ник)")
             chatBox.say("§a@status - статус системы")
+            chatBox.say("§a@rods - стержни в реакторе (пример: @rods или @rods 1)")
             chatBox.say("§a@setporog - установка порога жидкости (пример: @setporog 500)")
             chatBox.say("§a@start - запуск всех реакторов (или @start 1 для запуска только 1-го)")
             chatBox.say("§a@stop - остановка всех реакторов (или @stop 1 для остановки только 1-го)")
@@ -2578,6 +2697,52 @@ local function handleChatCommand(nick, msg, args)
             --         chatBox.say("§aРеактор " .. i .. ": §cОстановлен")
             --     end
             -- end
+        end
+
+    elseif msg:match("^@rods") then
+        if not isChatBox then
+            return
+        end
+
+        local num = tonumber(args:match("^(%d+)"))
+        if num and (num < 1 or num > reactors) then
+            chatBox.say("§cНеверный номер реактора!")
+            return
+        end
+
+        local first = num or 1
+        local last = num or reactors
+
+        for i = first, last do
+            local agg = getFuelRodsSummary(reactors_proxy[i])
+            if not agg or next(agg) == nil then
+                chatBox.say("§eРеактор " .. i .. ": §7нет данных о стержнях")
+            else
+                chatBox.say("§e=== Стержни реактора " .. i .. " ===")
+                local keys = {}
+                for k in pairs(agg) do
+                    table.insert(keys, tostring(k))
+                end
+                table.sort(keys)
+
+                local shown = 0
+                for _, k in ipairs(keys) do
+                    local e = agg[k]
+                    local line = "§a" .. k .. ": §e" .. tostring(e.count or 0)
+                    if e.pN and e.pN > 0 then
+                        local avg = (e.sumP / e.pN) * 100
+                        local mn = (e.minP or 0) * 100
+                        local mx = (e.maxP or 0) * 100
+                        line = line .. string.format(" §7(прочн. %.0f%%, мин %.0f%%, макс %.0f%%)", avg, mn, mx)
+                    end
+                    chatBox.say(line)
+                    shown = shown + 1
+                    if shown >= 8 and #keys > 8 then
+                        chatBox.say("§7... и ещё " .. tostring(#keys - 8) .. " тип(ов)")
+                        break
+                    end
+                end
+            end
         end
 
     elseif msg:match("^@start") then
