@@ -1192,7 +1192,8 @@ local function safeCall(proxy, method, default, ...)
 end
 
 local function extractRodId(rod)
-    if type(rod) ~= "table" then
+    local rodType = type(rod)
+    if rodType ~= "table" and rodType ~= "userdata" then
         return nil
     end
     local function normalizeToId(value)
@@ -1228,9 +1229,27 @@ local function extractRodId(rod)
         return nil
     end
 
+    local function safeIndex(obj, key)
+        local ok, v = pcall(function() return obj[key] end)
+        if ok then return v end
+        return nil
+    end
+
     local direct = {
-        rod.name, rod.id, rod.item, rod.itemName, rod.itemId, rod.type,
-        rod[1], rod[2], rod[3], rod[4], rod[5], rod[6], rod.stack, rod.itemStack
+        safeIndex(rod, "name"),
+        safeIndex(rod, "id"),
+        safeIndex(rod, "item"),
+        safeIndex(rod, "itemName"),
+        safeIndex(rod, "itemId"),
+        safeIndex(rod, "type"),
+        safeIndex(rod, 1),
+        safeIndex(rod, 2),
+        safeIndex(rod, 3),
+        safeIndex(rod, 4),
+        safeIndex(rod, 5),
+        safeIndex(rod, 6),
+        safeIndex(rod, "stack"),
+        safeIndex(rod, "itemStack"),
     }
     for _, value in ipairs(direct) do
         local id = normalizeToId(value)
@@ -1246,16 +1265,18 @@ local function extractRodId(rod)
         end
     end
 
-    for _, value in pairs(rod) do
-        local id = normalizeToId(value)
-        if id then
-            return id
-        end
-        if type(value) == "table" then
-            for _, v2 in pairs(value) do
-                id = normalizeToId(v2)
-                if id then
-                    return id
+    if rodType == "table" then
+        for _, value in pairs(rod) do
+            local id = normalizeToId(value)
+            if id then
+                return id
+            end
+            if type(value) == "table" then
+                for _, v2 in pairs(value) do
+                    id = normalizeToId(v2)
+                    if id then
+                        return id
+                    end
                 end
             end
         end
@@ -1372,11 +1393,13 @@ local function countRodsFromInventory(proxy)
     local maxSlot = nil
     for slot = 1, size do
         local stack = getStackInSlot(proxy, side, slot)
-        if type(stack) == "table" then
+        local st = type(stack)
+        if st == "table" or st == "userdata" then
             if isDurableStack(stack) then
                 local id = extractRodId(stack) or UNKNOWN_ROD_ID
-                counts[id] = (counts[id] or 0) + 1
-                total = total + 1
+                local amount = tonumber(stack.size) or tonumber(stack.count) or 1
+                counts[id] = (counts[id] or 0) + math.max(amount, 1)
+                total = total + math.max(amount, 1)
                 if minSlot == nil or slot < minSlot then minSlot = slot end
                 if maxSlot == nil or slot > maxSlot then maxSlot = slot end
             end
@@ -1404,11 +1427,13 @@ local function countRodsFromInventoryAllSides(proxy)
             local maxSlot = nil
             for slot = 1, size do
                 local stack = getStackInSlot(proxy, side, slot)
-                if type(stack) == "table" then
+                local st = type(stack)
+                if st == "table" or st == "userdata" then
                     if isDurableStack(stack) then
                         local id = extractRodId(stack) or UNKNOWN_ROD_ID
-                        counts[id] = (counts[id] or 0) + 1
-                        total = total + 1
+                        local amount = tonumber(stack.size) or tonumber(stack.count) or 1
+                        counts[id] = (counts[id] or 0) + math.max(amount, 1)
+                        total = total + math.max(amount, 1)
                         if minSlot == nil or slot < minSlot then minSlot = slot end
                         if maxSlot == nil or slot > maxSlot then maxSlot = slot end
                     end
@@ -1424,16 +1449,19 @@ local function countRodsFromInventoryAllSides(proxy)
                 local minSlot = nil
                 local maxSlot = nil
                 for _, stack in pairs(stacks) do
-                    if type(stack) == "table" then
+                    local st = type(stack)
+                    if st == "table" or st == "userdata" then
                         if isDurableStack(stack) then
                             local id = extractRodId(stack) or UNKNOWN_ROD_ID
-                            counts[id] = (counts[id] or 0) + 1
-                            total = total + 1
+                            local amount = tonumber(stack.size) or tonumber(stack.count) or 1
+                            counts[id] = (counts[id] or 0) + math.max(amount, 1)
+                            total = total + math.max(amount, 1)
                         end
                     end
                 end
                 for k, v in pairs(stacks) do
-                    if type(v) == "table" and isDurableStack(v) then
+                    local vt = type(v)
+                    if (vt == "table" or vt == "userdata") and isDurableStack(v) then
                         local nk = tonumber(k)
                         if nk then
                             if minSlot == nil or nk < minSlot then minSlot = nk end
@@ -3591,6 +3619,7 @@ local function mainLoop()
     -- supportersText = loadSupportersFromURL("https://github.com/P1KaChU337/Reactor-Control-for-OpenComputers/raw/refs/heads/main/supporters.txt")
     -- changelog = loadChangelog("https://github.com/P1KaChU337/Reactor-Control-for-OpenComputers/raw/refs/heads/main/changelog.lua")
     updateReactorData()
+    updateRodData()
     if reactors ~= 0 then
         message("Реакторы инициализированы!", colors.msginfo, 34)
     else
@@ -3598,7 +3627,10 @@ local function mainLoop()
         message("Проверьте подключение реакторов!", colors.msgerror, 34)
     end
     if starting == true then
+        -- Проверяем стержни до запуска (после старта программы)
+        updateRodData()
         start()
+        updateReactorData()
     end
 
     if isChatBox then
