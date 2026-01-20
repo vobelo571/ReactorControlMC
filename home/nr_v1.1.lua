@@ -122,6 +122,7 @@ local chatCommands = {
     ["@status"] = true,
     ["@rods"] = true,
     ["@tpscan"] = true,
+    ["@api"] = true,
     ["@setporog"] = true,
     ["@start"] = true,
     ["@stop"] = true,
@@ -1638,6 +1639,122 @@ local function scanTransposersToChat()
     end
 end
 
+local function listFilteredMethodsToChat(title, proxy, patterns, maxLines)
+    if not isChatBox then
+        return
+    end
+    maxLines = maxLines or 18
+    if not proxy or not proxy.address then
+        chatBox.say("§7" .. title .. ": §8proxy=nil")
+        return
+    end
+
+    local ok, methods = pcall(component.methods, proxy.address)
+    if not ok or type(methods) ~= "table" then
+        chatBox.say("§7" .. title .. ": §8нет component.methods")
+        return
+    end
+
+    local names = {}
+    for name, _ in pairs(methods) do
+        if type(name) == "string" then
+            local lower = name:lower()
+            local matched = false
+            for _, p in ipairs(patterns) do
+                if lower:find(p, 1, true) then
+                    matched = true
+                    break
+                end
+            end
+            if matched then
+                table.insert(names, name)
+            end
+        end
+    end
+    table.sort(names)
+
+    chatBox.say("§e" .. title .. " §7(фильтр, найдено " .. tostring(#names) .. "):")
+    if #names == 0 then
+        chatBox.say("§8(ничего подходящего)")
+        return
+    end
+
+    local shown = 0
+    local line = "§7"
+    for _, n in ipairs(names) do
+        local chunk = n
+        if #line + #chunk + 2 > 220 then
+            chatBox.say(line)
+            line = "§7"
+        end
+        if line ~= "§7" then
+            line = line .. ", "
+        end
+        line = line .. chunk
+        shown = shown + 1
+        if shown >= maxLines then
+            break
+        end
+    end
+    if line ~= "§7" then
+        chatBox.say(line)
+    end
+    if #names > shown then
+        chatBox.say("§7... и ещё " .. tostring(#names - shown))
+    end
+end
+
+local function tryCallInterestingMethodsToChat(title, proxy, patterns, maxCalls)
+    if not isChatBox then
+        return
+    end
+    maxCalls = maxCalls or 8
+    if not proxy then
+        return
+    end
+
+    local ok, methods = pcall(component.methods, proxy.address)
+    if not ok or type(methods) ~= "table" then
+        return
+    end
+
+    local names = {}
+    for name, _ in pairs(methods) do
+        if type(name) == "string" then
+            local lower = name:lower()
+            local matched = false
+            for _, p in ipairs(patterns) do
+                if lower:find(p, 1, true) then
+                    matched = true
+                    break
+                end
+            end
+            if matched then
+                table.insert(names, name)
+            end
+        end
+    end
+    table.sort(names)
+
+    local called = 0
+    for _, n in ipairs(names) do
+        if called >= maxCalls then
+            break
+        end
+        -- вызываем только методы без аргументов (если нужен аргумент — будет ошибка, покажем её)
+        local ok2, res = pcall(proxy[n], proxy)
+        if ok2 then
+            chatBox.say("§7" .. title .. "." .. n .. " -> §a" .. tostring(res))
+        else
+            -- чтобы не спамить, показываем только короткую ошибку
+            local err = tostring(res)
+            if #err > 120 then err = err:sub(1, 117) .. "..." end
+            chatBox.say("§7" .. title .. "." .. n .. " -> §8(err) " .. err)
+        end
+        called = called + 1
+    end
+end
+
 local function getFuelRodsSummary(inventoryProxy, statusProxy)
     -- 1) Самый точный путь без робота: transposer, подключённый к блоку реактора (видит реальный инвентарь)
     local tAgg, tInfo = getFuelRodsFromBestTransposer()
@@ -2994,6 +3111,7 @@ local function handleChatCommand(nick, msg, args)
             chatBox.say("§a@status - статус системы")
             chatBox.say("§a@rods - стержни в реакторе (пример: @rods или @rods 1)")
             chatBox.say("§a@tpscan - проверка транспозеров (где видны инвентари/стержни)")
+            chatBox.say("§a@api - показать API реактора/адаптера (пример: @api 1)")
             chatBox.say("§a@setporog - установка порога жидкости (пример: @setporog 500)")
             chatBox.say("§a@start - запуск всех реакторов (или @start 1 для запуска только 1-го)")
             chatBox.say("§a@stop - остановка всех реакторов (или @stop 1 для остановки только 1-го)")
@@ -3126,6 +3244,40 @@ local function handleChatCommand(nick, msg, args)
         if not ok and isChatBox then
             chatBox.say("§cОшибка tpscan: " .. tostring(err))
         end
+
+    elseif msg:match("^@api") then
+        if not isChatBox then
+            return
+        end
+        local num = tonumber(args:match("^(%d+)")) or 1
+        if num < 1 or num > reactors then
+            chatBox.say("§cНеверный номер реактора!")
+            return
+        end
+
+        local invProxy = nil
+        if reactor_adapter_index and adapters_proxy then
+            local aIdx = reactor_adapter_index[num]
+            if aIdx and adapters_proxy[aIdx] then
+                invProxy = adapters_proxy[aIdx]
+            elseif adapters_proxy[num] then
+                invProxy = adapters_proxy[num]
+            end
+        end
+
+        chatBox.say("§e=== API reactor " .. tostring(num) .. " ===")
+        local reactorProxy = reactors_proxy[num]
+        local patterns = {"rod", "fuel", "slot", "stack", "invent", "getall", "size"}
+
+        listFilteredMethodsToChat("htc_reactors", reactorProxy, patterns, 18)
+        if invProxy then
+            listFilteredMethodsToChat("adapter", invProxy, patterns, 18)
+        else
+            chatBox.say("§7adapter: §8не найден/не привязан")
+        end
+
+        -- Попробуем вызвать самые вероятные методы без аргументов
+        tryCallInterestingMethodsToChat("htc_reactors", reactorProxy, {"rod", "fuel", "slot"}, 6)
 
     elseif msg:match("^@start") then
         local num = tonumber(args:match("^(%d+)"))
