@@ -824,6 +824,20 @@ local function getRodTotalSlotsByLevel(level)
     return nil
 end
 
+local function safeUptime()
+    if computer and type(computer.uptime) == "function" then
+        local ok, t = pcall(computer.uptime)
+        if ok and type(t) == "number" then
+            return t
+        end
+    end
+    local ok2, t2 = pcall(os.clock)
+    if ok2 and type(t2) == "number" then
+        return t2
+    end
+    return 0
+end
+
 local function formatFuelTypeName(itemId)
     itemId = tostring(itemId or "")
     local lower = itemId:lower()
@@ -858,7 +872,7 @@ local function refreshReactorRodsInfo(i)
         reactor_rods_filled[i] = 0
         reactor_rods_total[i] = getRodTotalSlotsByLevel(reactor_level[i])
         reactor_rods_type[i] = "-"
-        reactor_rods_cache_at[i] = computer.uptime()
+        reactor_rods_cache_at[i] = safeUptime()
         return
     end
 
@@ -880,14 +894,21 @@ local function refreshReactorRodsInfo(i)
     reactor_rods_filled[i] = filled
     reactor_rods_total[i] = getRodTotalSlotsByLevel(reactor_level[i])
     reactor_rods_type[i] = mainType and formatFuelTypeName(mainType) or "-"
-    reactor_rods_cache_at[i] = computer.uptime()
+    reactor_rods_cache_at[i] = safeUptime()
 end
 
 local function ensureReactorRodsInfoFresh(i)
-    local now = computer.uptime()
+    local now = safeUptime()
     local last = reactor_rods_cache_at[i]
     if type(last) ~= "number" or (now - last) >= 5 then
-        refreshReactorRodsInfo(i)
+        local ok = pcall(refreshReactorRodsInfo, i)
+        if not ok then
+            -- никогда не роняем UI из‑за стержней
+            reactor_rods_filled[i] = reactor_rods_filled[i] or 0
+            reactor_rods_total[i] = reactor_rods_total[i] or getRodTotalSlotsByLevel(reactor_level[i])
+            reactor_rods_type[i] = reactor_rods_type[i] or "-"
+            reactor_rods_cache_at[i] = now
+        end
     end
 end
 
