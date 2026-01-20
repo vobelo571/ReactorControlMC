@@ -1326,7 +1326,7 @@ local function collectEligibleIntValuesFromRodRecord(rod, outSet)
     for k, v in pairs(rod) do
         if type(v) == "number" then
             local iv = math.floor(v)
-            if v == iv and iv >= 2 and iv <= 64 then
+            if v == iv and iv >= 1 and iv <= 64 then
                 -- отбрасываем наиболее вероятные "координатные" индексы и fuelLeft (6-й индекс уже встречался)
                 if k ~= 1 and k ~= 2 and k ~= 3 and k ~= 6 then
                     outSet[iv] = true
@@ -1382,10 +1382,19 @@ local function getFuelRodsFromStatus(proxy)
         if type(rod) == "table" then
             local key = tostring(rod.name or rod.type or rod.itemName or rod.item or "")
             if key == "" or key == "nil" then
-                key = tostring(extractFirstStringWithColon(rod) or "unknown")
+                -- часто в массивной части лежит item id, например rod[4] = "modid:item"
+                if type(rod[4]) == "string" and rod[4]:find(":", 1, true) then
+                    key = rod[4]
+                else
+                    key = tostring(extractFirstStringWithColon(rod) or "unknown")
+                end
             end
 
             local cnt = tonumber(rod.count or rod.size or rod.amount or rod.qty)
+            -- частый формат: rod[5] = stackSize (1..6), rod[6] = fuelLeft (уже используется в getDepletionTime)
+            if not cnt then
+                cnt = tonumber(rod[5])
+            end
             if not cnt and commonStack and recordHasEligibleIntValue(rod, commonStack) then
                 cnt = commonStack
             end
