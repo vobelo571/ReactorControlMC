@@ -816,14 +816,19 @@ local function formatRFwidgets(value)
 end
 
 local function getRodTotalSlotsByLevel(level)
-    -- Количество "ячеек" под стержни (в твоём интерфейсе: 20 мест, часть может быть пустой).
+    -- Количество "ячеек" под стержни (в твоём интерфейсе: 24 места, часть может быть пустой).
     -- Реальное количество стержней = ячейки * уровень реактора.
     -- Если на твоём сервере это отличается — скажи, подстроим.
     local lvl = tonumber(level)
     if lvl and lvl >= 1 then
-        return 20
+        return 24
     end
     return nil
+end
+
+local function isIgnoredRodItemId(itemId)
+    itemId = tostring(itemId or ""):lower()
+    return itemId == "htc_reactors:containments_reactor_casing"
 end
 
 -- forward declaration (UI uses it before definition later in file)
@@ -1686,6 +1691,11 @@ getFuelRodsFromSelectStatus = function(proxy)
                 itemId = tostring(extractFirstStringWithColon(rod) or "unknown")
             end
 
+            -- Игнорируем защитную оболочку: не расходуется, без прочности, не является стержнем
+            if isIgnoredRodItemId(itemId) then
+                goto continue_select
+            end
+
             -- Если мод отдаёт stack-size (1..6), обычно это будет count/size/amount.
             local cnt = extractCountFromKv(kv)
             if not cnt or cnt <= 0 then
@@ -1704,6 +1714,7 @@ getFuelRodsFromSelectStatus = function(proxy)
                 addFuelRodAggPercent(agg, itemId, cnt, pct)
                 any = true
             end
+            ::continue_select::
         end
     end
 
