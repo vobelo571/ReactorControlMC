@@ -106,7 +106,7 @@ local rods_cache = {
     res_min = {},
     res_max = {},
     last_update = {},
-    update_interval = 10, -- секунд между обновлениями для каждого реактора
+    update_interval = 30, -- секунд между обновлениями для каждого реактора
     scan_reactor = 1,
     disabled = false,
 }
@@ -883,7 +883,7 @@ local function drawWidgets()
             local resTxt = (type(res) == "number") and string.format("%.0f", res * 100) or "-"
             local rodsLine
             if slots ~= nil and eff ~= nil then
-                rodsLine = "Стерж: " .. tostring(eff) .. " (Сл " .. tostring(slots) .. ", У " .. tostring(lvl) .. ")"
+                rodsLine = "Стерж:" .. tostring(eff) .. " (" .. tostring(slots) .. "x" .. tostring(lvl) .. ")"
             else
                 rodsLine = "Стерж: - (Сл -, У " .. tostring(lvl) .. ")"
             end
