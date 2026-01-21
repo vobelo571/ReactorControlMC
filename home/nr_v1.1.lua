@@ -100,18 +100,12 @@ local reactor_ConsumptionPerSecond = {}
 local reactor_level = {}
 -- Короткая сводка по стержням (обновляется постепенно)
 local rods_cache = {
-    slots = {},
-    effective = {},
     res_avg = {},
-    res_min = {},
-    res_max = {},
     last_update = {},
-    update_interval = 30, -- секунд между обновлениями для каждого реактора
+    update_interval = 20, -- секунд между обновлениями для каждого реактора
     scan_reactor = 1,
     disabled = false,
 }
--- Режим минимальной нагрузки: показываем только ресурс/стержни
-local rods_only_mode = true
 local adapters_proxy = {}
 local adapters_address = {}
 local reactor_adapter_index = {}
@@ -134,9 +128,6 @@ local chatThread = nil
 local chatCommands = {
     ["@help"] = true,
     ["@status"] = true,
-    ["@rods"] = true,
-    ["@tpscan"] = true,
-    ["@api"] = true,
     ["@setporog"] = true,
     ["@start"] = true,
     ["@stop"] = true,
@@ -856,53 +847,34 @@ local function drawWidgets()
             buffer.drawText(x + 21, y + 11,  colors.bg, brailleChar(brail_status[3]))
             buffer.drawText(x,  y + 11,  colors.bg, brailleChar(brail_status[4]))
 
-            if not rods_only_mode then
-                if reactor_work[i] then
-                    if (reactor_depletionTime[i] or 0) <= 0 then
-                        local newTime = getDepletionTime(i)
-                        if newTime > 0 then
-                            reactor_depletionTime[i] = newTime
-                        else
-                            reactor_depletionTime[i] = 0
-                        end
+            if reactor_work[i] then
+                if (reactor_depletionTime[i] or 0) <= 0 then
+                    local newTime = getDepletionTime(i)
+                    if newTime > 0 then
+                        reactor_depletionTime[i] = newTime
                     else
-                        reactor_depletionTime[i] = reactor_depletionTime[i] - 1
+                        reactor_depletionTime[i] = 0
                     end
                 else
-                    reactor_depletionTime[i] = 0
+                    reactor_depletionTime[i] = reactor_depletionTime[i] - 1
                 end
+            else
+                reactor_depletionTime[i] = 0
             end
 
             buffer.drawText(x + 6,  y + 1,  colors.textclr, "Реактор #" .. i)
-            if not rods_only_mode then
-                buffer.drawText(x + 4,  y + 2,  colors.textclr, "Нагрев: " .. (temperature[i] or "-") .. "°C")
-                buffer.drawText(x + 4,  y + 3,  colors.textclr, formatRFwidgets(reactor_rf[i]))
-                buffer.drawText(x + 4,  y + 4,  colors.textclr, "Тип: " .. (reactor_type[i] or "-"))
-                buffer.drawText(x + 4,  y + 5,  colors.textclr, "Запущен: " .. (reactor_work[i] and "Да" or "Нет"))
-                buffer.drawText(x + 4,  y + 6,  colors.textclr, "Распад: " .. secondsToHMS(reactor_depletionTime[i] or 0))
-            end
-            -- Короткая сводка по стержням
-            local lvl = reactor_level[i] or 1
-            local slots = rods_cache.slots[i]
-            local eff = rods_cache.effective[i]
+            buffer.drawText(x + 4,  y + 2,  colors.textclr, "Нагрев: " .. (temperature[i] or "-") .. "°C")
+            buffer.drawText(x + 4,  y + 3,  colors.textclr, formatRFwidgets(reactor_rf[i]))
+            buffer.drawText(x + 4,  y + 4,  colors.textclr, "Тип: " .. (reactor_type[i] or "-"))
+            buffer.drawText(x + 4,  y + 5,  colors.textclr, "Запущен: " .. (reactor_work[i] and "Да" or "Нет"))
+            buffer.drawText(x + 4,  y + 6,  colors.textclr, "Распад: " .. secondsToHMS(reactor_depletionTime[i] or 0))
+            -- Ресурс реактора (в %)
             local res = rods_cache.res_avg[i]
             local resTxt = (type(res) == "number") and string.format("%.0f", res * 100) or "-"
-            local rodsLine
-            if slots ~= nil and eff ~= nil then
-                rodsLine = "Стерж: " .. tostring(eff) .. " (Сл " .. tostring(slots) .. ", У " .. tostring(lvl) .. ")"
-            else
-                rodsLine = "Стерж: - (Сл -, У " .. tostring(lvl) .. ")"
-            end
-            if rods_only_mode then
-                buffer.drawText(x + 4,  y + 3,  colors.textclr, shortenText(rodsLine, 18))
-                buffer.drawText(x + 4,  y + 4,  colors.textclr, shortenText("Ресурс: " .. tostring(resTxt) .. "%", 18))
-            else
-                buffer.drawText(x + 4,  y + 7,  colors.textclr, shortenText(rodsLine, 18))
-                buffer.drawText(x + 4,  y + 8,  colors.textclr, shortenText("Ресурс: " .. tostring(resTxt) .. "%", 18))
-                animatedButton(1, x + 6, y + 9, (reactor_work[i] and "Отключить" or "Включить"), nil, nil, 10, nil, nil, (reactor_work[i] and 0xfd3232 or 0x2beb1a))
-                if reactor_type[i] == "Fluid" then
-                    drawVerticalProgressBar(x + 1, y + 1, 9, reactor_getcoolant[i], reactor_maxcoolant[i], 0x0044FF, 0x00C8FF, colors.bg2)
-                end
+            buffer.drawText(x + 4,  y + 7,  colors.textclr, shortenText("Ресурс: " .. tostring(resTxt) .. "%", 18))
+            animatedButton(1, x + 6, y + 9, (reactor_work[i] and "Отключить" or "Включить"), nil, nil, 10, nil, nil, (reactor_work[i] and 0xfd3232 or 0x2beb1a))
+            if reactor_type[i] == "Fluid" then
+                drawVerticalProgressBar(x + 1, y + 1, 9, reactor_getcoolant[i], reactor_maxcoolant[i], 0x0044FF, 0x00C8FF, colors.bg2)
             end
         else
             local x, y = widgetCoords[i][1], widgetCoords[i][2]
@@ -915,19 +887,14 @@ local function drawWidgets()
             buffer.drawText(x,  y + 11,  colors.msgwarn, brailleChar(brail_status[4]))
 
             buffer.drawText(x + 6,  y + 1,  colors.msgerror, "Реактор #" .. i)
-            if rods_only_mode then
-                buffer.drawText(x + 4,  y + 3,  colors.msgerror, "Аварийно отключен!")
-                buffer.drawText(x + 4,  y + 4,  colors.msgerror, shortenText((reason or "Неизвестная ошибка!"), 18))
-            else
-                buffer.drawText(x + 4,  y + 3,  colors.msgerror, "Нагрев: " .. (temperature[i] or "-") .. "°C")
-                buffer.drawText(x + 4,  y + 4,  colors.msgerror, "Тип: " .. (reactor_type[i] or "-"))
-                buffer.drawText(x + 4,  y + 5,  colors.msgerror, "Cтатус:")
-                buffer.drawText(x + 4,  y + 6,  colors.msgerror, "Аварийно отключен!")
-                buffer.drawText(x + 4,  y + 7,  colors.msgerror, "Причина:")
-                buffer.drawText(x + 4,  y + 8,  colors.msgerror, (reason or "Неизвестная ошибка!"))
-                if reactor_type[i] == "Fluid" then
-                    drawVerticalProgressBar(x + 1, y + 1, 9, reactor_getcoolant[i], reactor_maxcoolant[i], 0x0044FF, 0x00C8FF, colors.bg2)
-                end
+            buffer.drawText(x + 4,  y + 3,  colors.msgerror, "Нагрев: " .. (temperature[i] or "-") .. "°C")
+            buffer.drawText(x + 4,  y + 4,  colors.msgerror, "Тип: " .. (reactor_type[i] or "-"))
+            buffer.drawText(x + 4,  y + 5,  colors.msgerror, "Cтатус:")
+            buffer.drawText(x + 4,  y + 6,  colors.msgerror, "Аварийно отключен!")
+            buffer.drawText(x + 4,  y + 7,  colors.msgerror, "Причина:")
+            buffer.drawText(x + 4,  y + 8,  colors.msgerror, (reason or "Неизвестная ошибка!"))
+            if reactor_type[i] == "Fluid" then
+                drawVerticalProgressBar(x + 1, y + 1, 9, reactor_getcoolant[i], reactor_maxcoolant[i], 0x0044FF, 0x00C8FF, colors.bg2)
             end
         end
     end
@@ -1651,12 +1618,6 @@ local function getFuelRodsFromSelectStatus(proxy)
 end
 
 local function getFuelRodsFromStatus(proxy)
-    -- Самая точная попытка: поиндексно через getSelectStatusRod (если отдаёт stack-size).
-    local byIdx = getFuelRodsFromSelectStatus(proxy)
-    if byIdx and next(byIdx) ~= nil then
-        return byIdx
-    end
-
     local rods = safeCallwg(proxy, "getAllFuelRodsStatus", nil)
     if type(rods) ~= "table" or #rods == 0 then
         return nil
@@ -1901,7 +1862,7 @@ local function getFuelRodsSummary(inventoryProxy, statusProxy)
     return nil, nil
 end
 
-local function computeRodsTotalsForReactor(i)
+local function computeRodsResourceForReactor(i)
     local proxy = reactors_proxy[i]
     if not proxy then
         return nil
@@ -1911,28 +1872,17 @@ local function computeRodsTotalsForReactor(i)
         return nil
     end
 
-    local slots = 0
     local sumP = 0
     local nP = 0
-    local minP = nil
-    local maxP = nil
 
     for _, e in pairs(agg) do
-        slots = slots + (tonumber(e.count) or 0)
         if e.pN and e.pN > 0 then
             sumP = sumP + (e.sumP or 0)
             nP = nP + (e.pN or 0)
-            if e.minP and (minP == nil or e.minP < minP) then
-                minP = e.minP
-            end
-            if e.maxP and (maxP == nil or e.maxP > maxP) then
-                maxP = e.maxP
-            end
         end
     end
 
-    local avgP = (nP > 0) and (sumP / nP) or nil
-    return slots, avgP, minP, maxP
+    return (nP > 0) and (sumP / nP) or nil
 end
 
 local function updateRodsCacheStep()
@@ -1954,24 +1904,9 @@ local function updateRodsCacheStep()
         return
     end
 
-    local slots, avgP, minP, maxP = computeRodsTotalsForReactor(i)
-    if slots then
-        local lvl = reactor_level[i] or getReactorLevel(reactors_proxy[i]) or 1
-        reactor_level[i] = lvl
-        rods_cache.slots[i] = slots
-        rods_cache.effective[i] = slots * (tonumber(lvl) or 1)
-        rods_cache.res_avg[i] = avgP
-        rods_cache.res_min[i] = minP
-        rods_cache.res_max[i] = maxP
-        rods_cache.last_update[i] = now
-    else
-        rods_cache.slots[i] = nil
-        rods_cache.effective[i] = nil
-        rods_cache.res_avg[i] = nil
-        rods_cache.res_min[i] = nil
-        rods_cache.res_max[i] = nil
-        rods_cache.last_update[i] = now
-    end
+    local avgP = computeRodsResourceForReactor(i)
+    rods_cache.res_avg[i] = avgP
+    rods_cache.last_update[i] = now
 
     rods_cache.scan_reactor = i + 1
     if rods_cache.scan_reactor > reactors then
@@ -2383,25 +2318,19 @@ end
 local function updateReactorData(num)
     for i = num or 1, num or reactors do
         local proxy = reactors_proxy[i]
-        if rods_only_mode then
-            reactor_level[i] = getReactorLevel(proxy) or reactor_level[i] or 1
-        else
-            temperature[i]      = safeCall(proxy, "getTemperature", 0)
-            reactor_type[i]     = safeCall(proxy, "isActiveCooling", false) and "Fluid" or "Air"
-            reactor_rf[i]       = safeCall(proxy, "getEnergyGeneration", 0)
-            reactor_work[i]     = safeCall(proxy, "hasWork", false)
-            reactor_level[i]    = getReactorLevel(proxy) or reactor_level[i] or 1
+        temperature[i]      = safeCall(proxy, "getTemperature", 0)
+        reactor_type[i]     = safeCall(proxy, "isActiveCooling", false) and "Fluid" or "Air"
+        reactor_rf[i]       = safeCall(proxy, "getEnergyGeneration", 0)
+        reactor_work[i]     = safeCall(proxy, "hasWork", false)
+        reactor_level[i]    = getReactorLevel(proxy) or reactor_level[i] or 1
 
-            if reactor_type[i] == "Fluid" then
-                reactor_getcoolant[i] = safeCall(proxy, "getFluidCoolant", 0) or 0
-                reactor_maxcoolant[i] = safeCall(proxy, "getMaxFluidCoolant", 0) or 1
-            end
+        if reactor_type[i] == "Fluid" then
+            reactor_getcoolant[i] = safeCall(proxy, "getFluidCoolant", 0) or 0
+            reactor_maxcoolant[i] = safeCall(proxy, "getMaxFluidCoolant", 0) or 1
         end
     end
-    if not rods_only_mode then
-        drawWidgets()
-        drawRFinfo()
-    end
+    drawWidgets()
+    drawRFinfo()
 end
 
 local function start(num)
@@ -3318,9 +3247,6 @@ local function handleChatCommand(nick, msg, args)
             chatBox.say("§a@useradd - добавить пользователя (пример: @useradd Ник)") -- Сделай
             chatBox.say("§a@userdel - удалить пользователя (пример: @userdel Ник)")
             chatBox.say("§a@status - статус системы")
-            chatBox.say("§a@rods - стержни в реакторе (пример: @rods или @rods 1)")
-            chatBox.say("§a@tpscan - проверка транспозеров (где видны инвентари/стержни)")
-            chatBox.say("§a@api - показать API реактора/адаптера (пример: @api 1)")
             chatBox.say("§a@setporog - установка порога жидкости (пример: @setporog 500)")
             chatBox.say("§a@start - запуск всех реакторов (или @start 1 для запуска только 1-го)")
             chatBox.say("§a@stop - остановка всех реакторов (или @stop 1 для остановки только 1-го)")
@@ -3991,11 +3917,7 @@ local function mainLoop()
     adapters_address = {}
     reactor_adapter_index = {}
     reactor_level = {}
-    rods_cache.slots = {}
-    rods_cache.effective = {}
     rods_cache.res_avg = {}
-    rods_cache.res_min = {}
-    rods_cache.res_max = {}
     rods_cache.last_update = {}
     rods_cache.scan_reactor = 1
     rods_cache.disabled = false
@@ -4068,7 +3990,7 @@ local function mainLoop()
         end
         return
     end
-    if offFluid == true and not rods_only_mode then
+    if offFluid == true then
         for i = 1, reactors do
             if reactor_type[i] == "Fluid" then
                 if reactor_work[i] == true then
@@ -4126,129 +4048,123 @@ local function mainLoop()
                     rods_cache.disabled = true
                 end
             end
-            if not rods_only_mode then
-                if work == true then
-                    if second % 5 == 0 then
-                        for i = 1, reactors do
-                            local proxy = reactors_proxy[i]
-                            if proxy and proxy.getTemperature then
-                                reactor_rf[i] = safeCall(proxy, "getEnergyGeneration", 0)
-                                reactor_maxcoolant[i] = safeCall(proxy, "getMaxFluidCoolant", 0) or 1
-                            else
-                                reactor_rf[i] = 0
-                                reactor_maxcoolant[i] = 1
-                            end
-                            
-                        end
-                        drawRFinfo()
-                    end
-
-                    if second % 2 == 0 then
-                        for i = 1, reactors do
-                            if reactor_type[i] == "Fluid" then
-                                local proxy = reactors_proxy[i]
-                                if proxy and proxy.getFluidCoolant then
-                                    temperature[i]  = safeCall(proxy, "getTemperature", 0)
-                                    reactor_getcoolant[i] = safeCall(proxy, "getFluidCoolant", 0) or 0
-                                else
-                                    reactor_getcoolant[i] = 0
-                                    temperature[i] = 0
-                                end
-                            end
-                            
-                        end
-                    end
-                -- else -- Убрал else возможно временно если будут баги
-                    if second % 13 == 0 then
-                        for i = 1, reactors do
-                            local proxy = reactors_proxy[i]
-                            if proxy and proxy.hasWork then
-                                reactor_work[i] = safeCall(proxy, "hasWork", false)
-                                reactor_type[i] = safeCall(proxy, "isActiveCooling", false) and "Fluid" or "Air"
-                            else
-                                reactor_work[i] = false
-                            end
-                            
-                        end
-                    end
-                end
-
-                for i = 1, reactors do
-                    if reactor_type[i] == "Fluid" then
-                        local current_coolant = reactor_getcoolant[i]
-                        local max_coolant = reactor_maxcoolant[i]
-                        
-                        -- 1. Проверка на аварийную остановку (ниже 60%)
-                        if current_coolant <= (max_coolant * 0.68) then
-                            if reactor_work[i] == true then
-                                silentstop(i)
-                                -- updateReactorData(i)
-                                reactor_aborted[i] = true
-                                reason = "Нет жидкости"
-                                message("Реактор " .. i .. " ОСТАНОВЛЕН! Уровень буфера критически низок", colors.msgwarn)
-                                message("Проверьте реакторную зону!", colors.msgwarn)
-                                -- message("Запуск реактора #" .. i .. " возможен только вручную.", colors.msgwarn)
-                            end
-                        end
-
-                        -- 2. Проверка на готовность к запуску (выше 80%)
-                        -- Это позволит убрать флаг ошибки, когда бак достаточно заполнится
-                        if reactor_aborted[i] and current_coolant >= (max_coolant * 0.8) and offFluid == false then
-                            reactor_aborted[i] = false
-                            message("Реактор " .. i .. " готов к работе (уровень восстановился).", colors.msginfo)
-                        end
-                    end
-                end
-
+            if work == true then
                 if second % 5 == 0 then
-                    consumeSecond = getTotalFluidConsumption()
-                    drawStatus()
-                    drawFluxRFinfo()
-                    if flux_network == true and flux_checked == false then
-                        clearRightWidgets()
-                        drawDynamic()
-                        flux_checked = true
-                    elseif flux_network == false and flux_checked == true then
-                        clearRightWidgets()
-                        drawDynamic()
-                        flux_checked = false
+                    for i = 1, reactors do
+                        local proxy = reactors_proxy[i]
+                        if proxy and proxy.getTemperature then
+                            reactor_rf[i] = safeCall(proxy, "getEnergyGeneration", 0)
+                            reactor_maxcoolant[i] = safeCall(proxy, "getMaxFluidCoolant", 0) or 1
+                        else
+                            reactor_rf[i] = 0
+                            reactor_maxcoolant[i] = 1
+                        end
+                        
                     end
+                    drawRFinfo()
                 end
 
-                if any_reactor_on then
-                    if depletionTime <= 0 then
-                        local newTime = getDepletionTime()
-                        if newTime > 0 then
-                            depletionTime = newTime
-                        else
-                            depletionTime = 0
-                        end
-                    else
-                        depletionTime = depletionTime - 1
-                    end
-                else
-                    depletionTime = 0
-                end
-                if second >= 60 then
-                    minute = minute + 1
-                    -- if minute % 10 == 0 then
-                    --     supportersText = loadSupportersFromURL("https://github.com/P1KaChU337/Reactor-Control-for-OpenComputers/raw/refs/heads/main/supporters.txt")
-                    --     changelog = loadChangelog("https://github.com/P1KaChU337/Reactor-Control-for-OpenComputers/raw/refs/heads/main/changelog.lua")
-                    -- end
-                    if minute >= 60 then
-                        -- checkVer()
-                        hour = hour + 1
-                        minute = 0
-                    end
-                    second = 0
-                end
-                drawTimeInfo()
-                drawWidgets()
-            else
                 if second % 2 == 0 then
-                    drawWidgets()
+                    for i = 1, reactors do
+                        if reactor_type[i] == "Fluid" then
+                            local proxy = reactors_proxy[i]
+                            if proxy and proxy.getFluidCoolant then
+                                temperature[i]  = safeCall(proxy, "getTemperature", 0)
+                                reactor_getcoolant[i] = safeCall(proxy, "getFluidCoolant", 0) or 0
+                            else
+                                reactor_getcoolant[i] = 0
+                                temperature[i] = 0
+                            end
+                        end
+                        
+                    end
+                end
+            -- else -- Убрал else возможно временно если будут баги
+                if second % 13 == 0 then
+                    for i = 1, reactors do
+                        local proxy = reactors_proxy[i]
+                        if proxy and proxy.hasWork then
+                            reactor_work[i] = safeCall(proxy, "hasWork", false)
+                            reactor_type[i] = safeCall(proxy, "isActiveCooling", false) and "Fluid" or "Air"
+                        else
+                            reactor_work[i] = false
+                        end
+                        
+                    end
                 end
             end
+
+            for i = 1, reactors do
+                if reactor_type[i] == "Fluid" then
+                    local current_coolant = reactor_getcoolant[i]
+                    local max_coolant = reactor_maxcoolant[i]
+                    
+                    -- 1. Проверка на аварийную остановку (ниже 60%)
+                    if current_coolant <= (max_coolant * 0.68) then
+                        if reactor_work[i] == true then
+                            silentstop(i)
+                            -- updateReactorData(i)
+                            reactor_aborted[i] = true
+                            reason = "Нет жидкости"
+                            message("Реактор " .. i .. " ОСТАНОВЛЕН! Уровень буфера критически низок", colors.msgwarn)
+                            message("Проверьте реакторную зону!", colors.msgwarn)
+                            -- message("Запуск реактора #" .. i .. " возможен только вручную.", colors.msgwarn)
+                        end
+                    end
+
+                    -- 2. Проверка на готовность к запуску (выше 80%)
+                    -- Это позволит убрать флаг ошибки, когда бак достаточно заполнится
+                    if reactor_aborted[i] and current_coolant >= (max_coolant * 0.8) and offFluid == false then
+                        reactor_aborted[i] = false
+                        message("Реактор " .. i .. " готов к работе (уровень восстановился).", colors.msginfo)
+                    end
+                end
+            end
+
+            if second % 5 == 0 then
+                consumeSecond = getTotalFluidConsumption()
+                drawStatus()
+                drawFluxRFinfo()
+                if flux_network == true and flux_checked == false then
+                    clearRightWidgets()
+                    drawDynamic()
+                    flux_checked = true
+                elseif flux_network == false and flux_checked == true then
+                    clearRightWidgets()
+                    drawDynamic()
+                    flux_checked = false
+                end
+            end
+
+            if any_reactor_on then
+                if depletionTime <= 0 then
+                    local newTime = getDepletionTime()
+                    if newTime > 0 then
+                        depletionTime = newTime
+                    else
+                        depletionTime = 0
+                    end
+                else
+                    depletionTime = depletionTime - 1
+                end
+            else
+                depletionTime = 0
+            end
+            if second >= 60 then
+                minute = minute + 1
+                -- if minute % 10 == 0 then
+                --     supportersText = loadSupportersFromURL("https://github.com/P1KaChU337/Reactor-Control-for-OpenComputers/raw/refs/heads/main/supporters.txt")
+                --     changelog = loadChangelog("https://github.com/P1KaChU337/Reactor-Control-for-OpenComputers/raw/refs/heads/main/changelog.lua")
+                -- end
+                if minute >= 60 then
+                    -- checkVer()
+                    hour = hour + 1
+                    minute = 0
+                end
+                second = 0
+            end
+            drawTimeInfo()
+            drawWidgets()
         end
         -- if supportersText then
         --     drawMarquee(124, 6, supportersText ..  "                            ", 0xF15F2C)
