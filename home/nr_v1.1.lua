@@ -98,7 +98,7 @@ local reactor_maxcoolant = {}
 local reactor_depletionTime = {}
 local reactor_ConsumptionPerSecond = {}
 local reactor_level = {}
--- Кеш по стержням для карточек (обновляется постепенно)
+-- Короткая сводка по стержням (обновляется постепенно)
 local reactor_rods_slots = {}
 local reactor_rods_effective = {}
 local reactor_rods_res_avg = {}
@@ -872,7 +872,7 @@ local function drawWidgets()
             buffer.drawText(x + 4,  y + 4,  colors.textclr, "Тип: " .. (reactor_type[i] or "-"))
             buffer.drawText(x + 4,  y + 5,  colors.textclr, "Запущен: " .. (reactor_work[i] and "Да" or "Нет"))
             buffer.drawText(x + 4,  y + 6,  colors.textclr, "Распад: " .. secondsToHMS(reactor_depletionTime[i] or 0))
-            -- Стержни (кешировано)
+            -- Короткая сводка по стержням
             local lvl = reactor_level[i] or 1
             local slots = reactor_rods_slots[i]
             local eff = reactor_rods_effective[i]
@@ -1669,84 +1669,6 @@ local function getFuelRodsFromStatus(proxy)
     return agg
 end
 
-local function computeRodsTotalsForReactor(i)
-    local proxy = reactors_proxy[i]
-    if not proxy then
-        return nil
-    end
-    local agg = getFuelRodsFromStatus(proxy)
-    if not agg or next(agg) == nil then
-        return nil
-    end
-
-    local slots = 0
-    local sumP = 0
-    local nP = 0
-    local minP = nil
-    local maxP = nil
-
-    for _, e in pairs(agg) do
-        slots = slots + (tonumber(e.count) or 0)
-        if e.pN and e.pN > 0 then
-            sumP = sumP + (e.sumP or 0)
-            nP = nP + (e.pN or 0)
-            if e.minP and (minP == nil or e.minP < minP) then
-                minP = e.minP
-            end
-            if e.maxP and (maxP == nil or e.maxP > maxP) then
-                maxP = e.maxP
-            end
-        end
-    end
-
-    local avgP = (nP > 0) and (sumP / nP) or nil
-    return slots, avgP, minP, maxP
-end
-
-local function updateRodsCacheStep()
-    if reactors <= 0 then
-        return
-    end
-    if rods_scan_reactor < 1 or rods_scan_reactor > reactors then
-        rods_scan_reactor = 1
-    end
-
-    local i = rods_scan_reactor
-    local now = computer.uptime()
-    local last = reactor_rods_last_update[i] or 0
-    if now - last < rods_update_interval then
-        rods_scan_reactor = i + 1
-        if rods_scan_reactor > reactors then
-            rods_scan_reactor = 1
-        end
-        return
-    end
-
-    local slots, avgP, minP, maxP = computeRodsTotalsForReactor(i)
-    if slots then
-        local lvl = reactor_level[i] or getReactorLevel(reactors_proxy[i]) or 1
-        reactor_level[i] = lvl
-        reactor_rods_slots[i] = slots
-        reactor_rods_effective[i] = slots * (tonumber(lvl) or 1)
-        reactor_rods_res_avg[i] = avgP
-        reactor_rods_res_min[i] = minP
-        reactor_rods_res_max[i] = maxP
-        reactor_rods_last_update[i] = now
-    else
-        reactor_rods_slots[i] = nil
-        reactor_rods_effective[i] = nil
-        reactor_rods_res_avg[i] = nil
-        reactor_rods_res_min[i] = nil
-        reactor_rods_res_max[i] = nil
-        reactor_rods_last_update[i] = now
-    end
-
-    rods_scan_reactor = i + 1
-    if rods_scan_reactor > reactors then
-        rods_scan_reactor = 1
-    end
-end
-
 local function scanTransposersToChat()
     if not isChatBox then
         return
@@ -1958,6 +1880,84 @@ local function getFuelRodsSummary(inventoryProxy, statusProxy)
         return getFuelRodsFromStatus(statusProxy), nil
     end
     return nil, nil
+end
+
+local function computeRodsTotalsForReactor(i)
+    local proxy = reactors_proxy[i]
+    if not proxy then
+        return nil
+    end
+    local agg = getFuelRodsFromStatus(proxy)
+    if not agg or next(agg) == nil then
+        return nil
+    end
+
+    local slots = 0
+    local sumP = 0
+    local nP = 0
+    local minP = nil
+    local maxP = nil
+
+    for _, e in pairs(agg) do
+        slots = slots + (tonumber(e.count) or 0)
+        if e.pN and e.pN > 0 then
+            sumP = sumP + (e.sumP or 0)
+            nP = nP + (e.pN or 0)
+            if e.minP and (minP == nil or e.minP < minP) then
+                minP = e.minP
+            end
+            if e.maxP and (maxP == nil or e.maxP > maxP) then
+                maxP = e.maxP
+            end
+        end
+    end
+
+    local avgP = (nP > 0) and (sumP / nP) or nil
+    return slots, avgP, minP, maxP
+end
+
+local function updateRodsCacheStep()
+    if reactors <= 0 then
+        return
+    end
+    if rods_scan_reactor < 1 or rods_scan_reactor > reactors then
+        rods_scan_reactor = 1
+    end
+
+    local i = rods_scan_reactor
+    local now = computer.uptime()
+    local last = reactor_rods_last_update[i] or 0
+    if now - last < rods_update_interval then
+        rods_scan_reactor = i + 1
+        if rods_scan_reactor > reactors then
+            rods_scan_reactor = 1
+        end
+        return
+    end
+
+    local slots, avgP, minP, maxP = computeRodsTotalsForReactor(i)
+    if slots then
+        local lvl = reactor_level[i] or getReactorLevel(reactors_proxy[i]) or 1
+        reactor_level[i] = lvl
+        reactor_rods_slots[i] = slots
+        reactor_rods_effective[i] = slots * (tonumber(lvl) or 1)
+        reactor_rods_res_avg[i] = avgP
+        reactor_rods_res_min[i] = minP
+        reactor_rods_res_max[i] = maxP
+        reactor_rods_last_update[i] = now
+    else
+        reactor_rods_slots[i] = nil
+        reactor_rods_effective[i] = nil
+        reactor_rods_res_avg[i] = nil
+        reactor_rods_res_min[i] = nil
+        reactor_rods_res_max[i] = nil
+        reactor_rods_last_update[i] = now
+    end
+
+    rods_scan_reactor = i + 1
+    if rods_scan_reactor > reactors then
+        rods_scan_reactor = 1
+    end
 end
 
 local function getReactorLevel(proxy)
