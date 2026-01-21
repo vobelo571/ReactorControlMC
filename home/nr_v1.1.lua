@@ -103,6 +103,7 @@ local reactor_rods_total = {}
 local reactor_rods_type = {}
 local reactor_rods_cache_at = {}
 local reactor_rods_callmode = {} -- address -> "noself" | "self"
+local reactor_rods_refresh_cursor = 1
 local adapters_proxy = {}
 local adapters_address = {}
 local reactor_adapter_index = {}
@@ -967,6 +968,18 @@ local function ensureReactorRodsInfoFresh(i)
     end
 end
 
+local function refreshOneReactorRods()
+    if reactors <= 0 then
+        return
+    end
+    if reactor_rods_refresh_cursor > reactors then
+        reactor_rods_refresh_cursor = 1
+    end
+    local idx = reactor_rods_refresh_cursor
+    reactor_rods_refresh_cursor = reactor_rods_refresh_cursor + 1
+    ensureReactorRodsInfoFresh(idx)
+end
+
 
 local function drawWidgets()
     if reactors <= 0 then
@@ -986,6 +999,9 @@ local function drawWidgets()
     end
 
     buffer.drawRectangle(5, 5, 114, 37, colors.bg4, 0, " ")
+
+    -- чтобы не фризить UI — обновляем стержни только для одного реактора за кадр
+    refreshOneReactorRods()
 
     for i = 1, math.min(reactors, #widgetCoords) do
         if reactor_aborted[i] == false then
@@ -1012,8 +1028,6 @@ local function drawWidgets()
             else
                 reactor_depletionTime[i] = 0
             end
-
-            ensureReactorRodsInfoFresh(i)
 
             buffer.drawText(x + 6,  y + 1,  colors.textclr, "Реактор #" .. i)
             buffer.drawText(x + 4,  y + 2,  colors.textclr, "Нагрев: " .. (temperature[i] or "-") .. "°C")
@@ -4045,6 +4059,7 @@ local function mainLoop()
     reactor_rods_total = {}
     reactor_rods_type = {}
     reactor_rods_cache_at = {}
+    reactor_rods_refresh_cursor = 1
     
     me_proxy = nil
     me_network = false
