@@ -98,8 +98,7 @@ local reactor_maxcoolant = {}
 local reactor_depletionTime = {}
 local reactor_ConsumptionPerSecond = {}
 local reactor_level = {}
--- Кеш по стержням (дорого опрашивать постоянно: getSelectStatusRod делает много вызовов).
--- Обновляем редко: при запуске реактора и далее раз в 5-10 минут, растягивая обновление.
+-- Кеш по стержням: getSelectStatusRod(0..64) дорогой, поэтому обновляем редко и пошагово
 local reactor_rods_slots = {}
 local reactor_rods_effective = {}
 local reactor_rods_res_avg = {}
@@ -107,10 +106,13 @@ local reactor_rods_res_min = {}
 local reactor_rods_res_max = {}
 local reactor_rods_fuel_type = {}
 local reactor_rods_last_update = {}
-local rods_update_interval = 600 -- 10 минут (поставь 300 если хочешь каждые 5 минут)
+local rods_update_interval = 600 -- секунд (10 минут). Если всё ещё подлагивает — увеличь.
+local rods_step_per_tick = 2     -- сколько индексов обрабатывать за 1 секунду (держи маленьким)
 local rods_scanning = false
-local rods_scan_index = 1
+local rods_scan_reactor = 1
+local rods_scan_idx = 0
 local rods_next_scan_time = 0
+local rods_scan_state = nil
 local adapters_proxy = {}
 local adapters_address = {}
 local reactor_adapter_index = {}
@@ -876,7 +878,6 @@ local function drawWidgets()
             buffer.drawText(x + 4,  y + 4,  colors.textclr, "Тип: " .. (reactor_type[i] or "-"))
             buffer.drawText(x + 4,  y + 5,  colors.textclr, "Запущен: " .. (reactor_work[i] and "Да" or "Нет"))
             buffer.drawText(x + 4,  y + 6,  colors.textclr, "Распад: " .. secondsToHMS(reactor_depletionTime[i] or 0))
-
             -- Стержни (кешировано, чтобы не лагало)
             local fuelT = reactor_rods_fuel_type[i] or "-"
             buffer.drawText(x + 4,  y + 7,  colors.textclr, "Топл: " .. shortenText(tostring(fuelT), 14))
@@ -892,7 +893,6 @@ local function drawWidgets()
                 rodsLine = "Стерж:- Сл- У" .. tostring(lvl) .. " Р-"
             end
             buffer.drawText(x + 4,  y + 8,  colors.textclr, shortenText(rodsLine, 18))
-
             animatedButton(1, x + 6, y + 9, (reactor_work[i] and "Отключить" or "Включить"), nil, nil, 10, nil, nil, (reactor_work[i] and 0xfd3232 or 0x2beb1a))
             if reactor_type[i] == "Fluid" then
                 drawVerticalProgressBar(x + 1, y + 1, 9, reactor_getcoolant[i], reactor_maxcoolant[i], 0x0044FF, 0x00C8FF, colors.bg2)
@@ -1592,6 +1592,163 @@ local function extractCountFromKv(kv)
     )
 end
 
+local function fuelTypeFromItemId(itemId)
+    local s = tostring(itemId or ""):lower()
+    if s:find("mox", 1, true) then
+        return "MOX"
+    end
+    if s:find("uran", 1, true) then
+        return "Уран"
+    end
+    if s:find("pluton", 1, true) then
+        return "Плутоний"
+    end
+    if s:find("thor", 1, true) then
+        return "Торий"
+    end
+    local tail = tostring(itemId or ""):match(":(.+)$")
+    if tail and tail ~= "" then
+        if #tail > 10 then
+            tail = tail:sub(1, 10) .. "…"
+        end
+        return tail
+    end
+    return "-"
+end
+
+local function clearRodsCache(i)
+    reactor_rods_slots[i] = nil
+    reactor_rods_effective[i] = nil
+    reactor_rods_res_avg[i] = nil
+    reactor_rods_res_min[i] = nil
+    reactor_rods_res_max[i] = nil
+    reactor_rods_fuel_type[i] = nil
+    reactor_rods_last_update[i] = nil
+end
+
+local function beginRodsScanForReactor(i)
+    rods_scan_reactor = i
+    rods_scan_idx = 0
+    rods_scan_state = {
+        slots = 0,
+        sumP = 0,
+        nP = 0,
+        minP = nil,
+        maxP = nil,
+        dominantItem = nil,
+        dominantSlots = 0,
+        itemSlots = {}
+    }
+end
+
+local function finalizeRodsScanForReactor(i)
+    local st = rods_scan_state
+    if not st then
+        clearRodsCache(i)
+        return
+    end
+
+    local lvl = reactor_level[i] or getReactorLevel(reactors_proxy[i]) or 1
+    reactor_level[i] = lvl
+
+    reactor_rods_slots[i] = st.slots
+    reactor_rods_effective[i] = st.slots * (tonumber(lvl) or 1)
+    reactor_rods_fuel_type[i] = fuelTypeFromItemId(st.dominantItem)
+    reactor_rods_last_update[i] = computer.uptime()
+
+    if st.nP > 0 then
+        reactor_rods_res_avg[i] = st.sumP / st.nP
+        reactor_rods_res_min[i] = st.minP
+        reactor_rods_res_max[i] = st.maxP
+    else
+        reactor_rods_res_avg[i] = nil
+        reactor_rods_res_min[i] = nil
+        reactor_rods_res_max[i] = nil
+    end
+end
+
+local function rodsScanStep()
+    if reactors <= 0 then
+        return
+    end
+
+    local now = computer.uptime()
+    if not rods_scanning then
+        if rods_next_scan_time > 0 and now < rods_next_scan_time then
+            return
+        end
+        rods_scanning = true
+        beginRodsScanForReactor(1)
+    end
+
+    local i = rods_scan_reactor
+    if i < 1 or i > reactors then
+        rods_scanning = false
+        rods_next_scan_time = now + rods_update_interval
+        rods_scan_state = nil
+        return
+    end
+
+    local proxy = reactors_proxy[i]
+    if not proxy or not proxy.getSelectStatusRod then
+        clearRodsCache(i)
+        rods_scan_reactor = i + 1
+        if rods_scan_reactor > reactors then
+            rods_scanning = false
+            rods_next_scan_time = now + rods_update_interval
+            rods_scan_state = nil
+        else
+            beginRodsScanForReactor(rods_scan_reactor)
+        end
+        return
+    end
+
+    local processed = 0
+    while processed < rods_step_per_tick do
+        if rods_scan_idx > 64 then
+            finalizeRodsScanForReactor(i)
+            rods_scan_reactor = i + 1
+            if rods_scan_reactor > reactors then
+                rods_scanning = false
+                rods_next_scan_time = now + rods_update_interval
+                rods_scan_state = nil
+            else
+                beginRodsScanForReactor(rods_scan_reactor)
+            end
+            return
+        end
+
+        local ok, rod = callMethodFlexible(proxy, "getSelectStatusRod", rods_scan_idx)
+        rods_scan_idx = rods_scan_idx + 1
+        processed = processed + 1
+
+        if ok and type(rod) == "table" then
+            local kv = decodeKvArray(rod) or {}
+            local itemId = tostring(kv.item or "")
+            if itemId ~= "" and itemId ~= "nil" then
+                local st = rods_scan_state
+                st.slots = st.slots + 1
+
+                st.itemSlots[itemId] = (st.itemSlots[itemId] or 0) + 1
+                if st.itemSlots[itemId] > st.dominantSlots then
+                    st.dominantSlots = st.itemSlots[itemId]
+                    st.dominantItem = itemId
+                end
+
+                local fuel = tonumber(kv.fuel)
+                local maxFuel = tonumber(kv.maxFuel)
+                if fuel and maxFuel and maxFuel > 0 then
+                    local p = fuel / maxFuel
+                    if st.minP == nil or p < st.minP then st.minP = p end
+                    if st.maxP == nil or p > st.maxP then st.maxP = p end
+                    st.sumP = st.sumP + p
+                    st.nP = st.nP + 1
+                end
+            end
+        end
+    end
+end
+
 local function getFuelRodsFromSelectStatus(proxy)
     -- Пытаемся получить состояние по каждому "индексу стержня".
     -- На практике метод есть в htc_reactors и требует integer index.
@@ -1636,101 +1793,6 @@ local function getFuelRodsFromSelectStatus(proxy)
         return agg
     end
     return nil
-end
-
-local function fuelTypeFromItemId(itemId)
-    local s = tostring(itemId or ""):lower()
-    if s:find("mox", 1, true) then
-        return "MOX"
-    end
-    if s:find("uran", 1, true) then
-        return "Уран"
-    end
-    if s:find("pluton", 1, true) then
-        return "Плутоний"
-    end
-    if s:find("thor", 1, true) then
-        return "Торий"
-    end
-    local tail = tostring(itemId or ""):match(":(.+)$")
-    if tail and tail ~= "" then
-        if #tail > 10 then
-            tail = tail:sub(1, 10) .. "…"
-        end
-        return tail
-    end
-    return "-"
-end
-
-local function updateRodsCache(i)
-    local proxy = reactors_proxy[i]
-    if not proxy then
-        reactor_rods_slots[i] = nil
-        reactor_rods_effective[i] = nil
-        reactor_rods_res_avg[i] = nil
-        reactor_rods_res_min[i] = nil
-        reactor_rods_res_max[i] = nil
-        reactor_rods_fuel_type[i] = nil
-        reactor_rods_last_update[i] = nil
-        return
-    end
-
-    local ok, agg = pcall(getFuelRodsFromStatus, proxy)
-    if not ok or type(agg) ~= "table" or next(agg) == nil then
-        reactor_rods_slots[i] = nil
-        reactor_rods_effective[i] = nil
-        reactor_rods_res_avg[i] = nil
-        reactor_rods_res_min[i] = nil
-        reactor_rods_res_max[i] = nil
-        reactor_rods_fuel_type[i] = nil
-        reactor_rods_last_update[i] = computer.uptime()
-        return
-    end
-
-    local slots = 0
-    local sumP, nP = 0, 0
-    local minP, maxP = nil, nil
-    local dominantItem = nil
-    local dominantSlots = -1
-
-    for itemId, e in pairs(agg) do
-        if type(e) == "table" then
-            local s = tonumber(e.slots) or 0
-            slots = slots + s
-            if s > dominantSlots then
-                dominantSlots = s
-                dominantItem = itemId
-            end
-            if e.pN and e.pN > 0 then
-                sumP = sumP + (tonumber(e.sumP) or 0)
-                nP = nP + (tonumber(e.pN) or 0)
-                if e.minP ~= nil then
-                    minP = (minP == nil) and e.minP or math.min(minP, e.minP)
-                end
-                if e.maxP ~= nil then
-                    maxP = (maxP == nil) and e.maxP or math.max(maxP, e.maxP)
-                end
-            end
-        end
-    end
-
-    local lvl = reactor_level[i] or getReactorLevel(proxy) or 1
-    reactor_level[i] = lvl
-
-    reactor_rods_slots[i] = slots
-    reactor_rods_effective[i] = slots * (tonumber(lvl) or 1)
-    reactor_rods_fuel_type[i] = fuelTypeFromItemId(dominantItem)
-    reactor_rods_last_update[i] = computer.uptime()
-
-    if nP > 0 then
-        reactor_rods_res_avg[i] = sumP / nP
-        reactor_rods_res_min[i] = minP
-        reactor_rods_res_max[i] = maxP
-    else
-        reactor_rods_res_avg[i] = nil
-        reactor_rods_res_min[i] = nil
-        reactor_rods_res_max[i] = nil
-    end
 end
 
 local function getFuelRodsFromStatus(proxy)
@@ -2446,17 +2508,6 @@ local function start(num)
                 message("Реактор #" .. i .. " (воздушный) запущен!", colors.msginfo, 34)
             end
         end
-
-        -- Кеш стержней: при запуске конкретного реактора обновляем сразу
-        if num then
-            pcall(updateRodsCache, i)
-        end
-    end
-    -- При массовом запуске — включаем постепенное сканирование кеша стержней
-    if not num then
-        rods_scanning = true
-        rods_scan_index = 1
-        rods_next_scan_time = computer.uptime()
     end
     if not num then
         if offFluid == true then
@@ -4009,8 +4060,10 @@ local function mainLoop()
     reactor_rods_fuel_type = {}
     reactor_rods_last_update = {}
     rods_scanning = false
-    rods_scan_index = 1
+    rods_scan_reactor = 1
+    rods_scan_idx = 0
     rods_next_scan_time = 0
+    rods_scan_state = nil
     
     me_proxy = nil
     me_network = false
@@ -4052,10 +4105,8 @@ local function mainLoop()
     -- supportersText = loadSupportersFromURL("https://github.com/P1KaChU337/Reactor-Control-for-OpenComputers/raw/refs/heads/main/supporters.txt")
     -- changelog = loadChangelog("https://github.com/P1KaChU337/Reactor-Control-for-OpenComputers/raw/refs/heads/main/changelog.lua")
     updateReactorData()
-    -- Запускаем постепенное обновление кеша стержней, чтобы не было лагов на старте
-    rods_scanning = true
-    rods_scan_index = 1
-    rods_next_scan_time = computer.uptime()
+    -- стартуем фоновое кеширование стержней (пошагово, без зависаний)
+    rods_next_scan_time = computer.uptime() + 5
     if reactors ~= 0 then
         message("Реакторы инициализированы!", colors.msginfo, 34)
     else
@@ -4117,16 +4168,6 @@ local function mainLoop()
             initReactors()
             drawDynamic()
             updateReactorData()
-            reactor_rods_slots = {}
-            reactor_rods_effective = {}
-            reactor_rods_res_avg = {}
-            reactor_rods_res_min = {}
-            reactor_rods_res_max = {}
-            reactor_rods_fuel_type = {}
-            reactor_rods_last_update = {}
-            rods_scanning = true
-            rods_scan_index = 1
-            rods_next_scan_time = computer.uptime()
             message("Список реакторов обновлён", colors.textclr)
         end
 
@@ -4146,26 +4187,7 @@ local function mainLoop()
         if now - lastTime >= 1 then
             lastTime = now
             second = second + 1
-
-            -- Периодический опрос стержней: раз в rods_update_interval, по одному реактору за секунду
-            if reactors > 0 then
-                if (not rods_scanning) and rods_next_scan_time > 0 and now >= rods_next_scan_time then
-                    rods_scanning = true
-                    rods_scan_index = 1
-                end
-                if rods_scanning then
-                    if rods_scan_index < 1 or rods_scan_index > reactors then
-                        rods_scan_index = 1
-                    end
-                    pcall(updateRodsCache, rods_scan_index)
-                    rods_scan_index = rods_scan_index + 1
-                    if rods_scan_index > reactors then
-                        rods_scanning = false
-                        rods_next_scan_time = now + rods_update_interval
-                    end
-                end
-            end
-
+            pcall(rodsScanStep)
             if work == true then
                 if second % 5 == 0 then
                     for i = 1, reactors do
