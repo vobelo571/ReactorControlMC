@@ -98,6 +98,13 @@ local reactor_maxcoolant = {}
 local reactor_depletionTime = {}
 local reactor_ConsumptionPerSecond = {}
 local reactor_level = {}
+-- cached rod info per reactor card
+local reactor_rods_slots = {}
+local reactor_rods_effective = {}
+local reactor_rods_res_avg = {}
+local reactor_rods_res_min = {}
+local reactor_rods_res_max = {}
+local nextRodsUpdateIndex = 1
 local adapters_proxy = {}
 local adapters_address = {}
 local reactor_adapter_index = {}
@@ -863,6 +870,19 @@ local function drawWidgets()
             buffer.drawText(x + 4,  y + 4,  colors.textclr, "Тип: " .. (reactor_type[i] or "-"))
             buffer.drawText(x + 4,  y + 5,  colors.textclr, "Запущен: " .. (reactor_work[i] and "Да" or "Нет"))
             buffer.drawText(x + 4,  y + 6,  colors.textclr, "Распад: " .. secondsToHMS(reactor_depletionTime[i] or 0))
+            
+            local slots = reactor_rods_slots[i]
+            local eff = reactor_rods_effective[i]
+            local lvl = reactor_level[i] or 1
+            if eff ~= nil and slots ~= nil then
+                buffer.drawText(x + 4,  y + 7,  colors.textclr, "Стержни: " .. tostring(eff))
+                local p = reactor_rods_res_avg[i]
+                local pTxt = (type(p) == "number") and string.format("%.0f%%", p * 100) or "-"
+                buffer.drawText(x + 4,  y + 8,  colors.textclr, "Сл:" .. tostring(slots) .. " Ур:" .. tostring(lvl) .. " Р:" .. pTxt)
+            else
+                buffer.drawText(x + 4,  y + 7,  colors.textclr, "Стержни: -")
+                buffer.drawText(x + 4,  y + 8,  colors.textclr, "Сл:- Ур:" .. tostring(lvl) .. " Р:-")
+            end
             animatedButton(1, x + 6, y + 9, (reactor_work[i] and "Отключить" or "Включить"), nil, nil, 10, nil, nil, (reactor_work[i] and 0xfd3232 or 0x2beb1a))
             if reactor_type[i] == "Fluid" then
                 drawVerticalProgressBar(x + 1, y + 1, 9, reactor_getcoolant[i], reactor_maxcoolant[i], 0x0044FF, 0x00C8FF, colors.bg2)
@@ -2276,6 +2296,60 @@ local function updateReactorData(num)
     end
     drawWidgets()
     drawRFinfo()
+end
+
+local function updateRodsInfo(num)
+    for i = num or 1, num or reactors do
+        local proxy = reactors_proxy[i]
+        if not proxy then
+            reactor_rods_slots[i] = nil
+            reactor_rods_effective[i] = nil
+            reactor_rods_res_avg[i] = nil
+            reactor_rods_res_min[i] = nil
+            reactor_rods_res_max[i] = nil
+        else
+            local ok, agg = pcall(getFuelRodsFromStatus, proxy)
+            if ok and type(agg) == "table" and next(agg) ~= nil then
+                local slots = 0
+                local sumP, nP = 0, 0
+                local minP, maxP = nil, nil
+                for _, e in pairs(agg) do
+                    if type(e) == "table" then
+                        slots = slots + (tonumber(e.slots) or 0)
+                        if e.pN and e.pN > 0 then
+                            sumP = sumP + (tonumber(e.sumP) or 0)
+                            nP = nP + (tonumber(e.pN) or 0)
+                            if e.minP ~= nil then
+                                minP = (minP == nil) and e.minP or math.min(minP, e.minP)
+                            end
+                            if e.maxP ~= nil then
+                                maxP = (maxP == nil) and e.maxP or math.max(maxP, e.maxP)
+                            end
+                        end
+                    end
+                end
+                local lvl = reactor_level[i] or getReactorLevel(proxy) or 1
+                reactor_level[i] = lvl
+                reactor_rods_slots[i] = slots
+                reactor_rods_effective[i] = slots * (tonumber(lvl) or 1)
+                if nP > 0 then
+                    reactor_rods_res_avg[i] = sumP / nP
+                    reactor_rods_res_min[i] = minP
+                    reactor_rods_res_max[i] = maxP
+                else
+                    reactor_rods_res_avg[i] = nil
+                    reactor_rods_res_min[i] = nil
+                    reactor_rods_res_max[i] = nil
+                end
+            else
+                reactor_rods_slots[i] = nil
+                reactor_rods_effective[i] = nil
+                reactor_rods_res_avg[i] = nil
+                reactor_rods_res_min[i] = nil
+                reactor_rods_res_max[i] = nil
+            end
+        end
+    end
 end
 
 local function start(num)
@@ -3865,6 +3939,12 @@ local function mainLoop()
     adapters_address = {}
     reactor_adapter_index = {}
     reactor_level = {}
+    reactor_rods_slots = {}
+    reactor_rods_effective = {}
+    reactor_rods_res_avg = {}
+    reactor_rods_res_min = {}
+    reactor_rods_res_max = {}
+    nextRodsUpdateIndex = 1
     
     me_proxy = nil
     me_network = false
@@ -3986,6 +4066,17 @@ local function mainLoop()
         if now - lastTime >= 1 then
             lastTime = now
             second = second + 1
+            -- обновляем стержни по одному реактору в секунду (чтобы не лагало)
+            if reactors > 0 then
+                if nextRodsUpdateIndex < 1 or nextRodsUpdateIndex > reactors then
+                    nextRodsUpdateIndex = 1
+                end
+                updateRodsInfo(nextRodsUpdateIndex)
+                nextRodsUpdateIndex = nextRodsUpdateIndex + 1
+                if nextRodsUpdateIndex > reactors then
+                    nextRodsUpdateIndex = 1
+                end
+            end
             if work == true then
                 if second % 5 == 0 then
                     for i = 1, reactors do
