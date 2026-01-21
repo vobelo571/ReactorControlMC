@@ -140,11 +140,19 @@ local chatCommands = {
     ["@info"] = true
 }
 
-local widgetCoords = {
+local defaultWidgetCoords = {
     {10, 6}, {36, 6}, {65, 6}, {91, 6},
     {10, 18}, {36, 18}, {65, 18}, {91, 18},
     {10, 30}, {36, 30}, {65, 30}, {91, 30}
 }
+
+-- Компактная сетка на 6 реакторов (3x2), более центрированная
+local compactWidgetCoords = {
+    {23, 10}, {51, 10}, {79, 10},
+    {23, 25}, {51, 25}, {79, 25},
+}
+
+local widgetCoords = defaultWidgetCoords
 
 local config = {
     clickArea19 = {x1=4,  y1=44, x2=9,  y2=46}, -- Кнопка 🔧 (x:5, y:44)
@@ -158,20 +166,36 @@ local config = {
 
     clickArea5  = {x1=67, y1=44, x2=86, y2=46}, -- Обновить МЭ (x:68, y:44)
     clickArea6  = {x1=67, y1=47, x2=86, y2=49}, -- Метрика (x:68, y:47)
-    -- Координаты для кнопок на виджетах
-    clickArea7 = {x1=widgetCoords[1][1]+5, y1=widgetCoords[1][2]+9, x2=widgetCoords[1][1]+11, y2=widgetCoords[1][2]+10}, -- Реактор 1
-    clickArea8 = {x1=widgetCoords[2][1]+5, y1=widgetCoords[2][2]+9, x2=widgetCoords[2][1]+11, y2=widgetCoords[2][2]+10}, -- Реактор 2
-    clickArea9 = {x1=widgetCoords[3][1]+5, y1=widgetCoords[3][2]+9, x2=widgetCoords[3][1]+11, y2=widgetCoords[3][2]+10}, -- Реактор 3
-    clickArea10 = {x1=widgetCoords[4][1]+5, y1=widgetCoords[4][2]+9, x2=widgetCoords[4][1]+11, y2=widgetCoords[4][2]+10}, -- Реактор 4
-    clickArea11 = {x1=widgetCoords[5][1]+5, y1=widgetCoords[5][2]+9, x2=widgetCoords[5][1]+11, y2=widgetCoords[5][2]+10}, -- Реактор 5
-    clickArea12 = {x1=widgetCoords[6][1]+5, y1=widgetCoords[6][2]+9, x2=widgetCoords[6][1]+11, y2=widgetCoords[6][2]+10}, -- Реактор 6
-    clickArea13 = {x1=widgetCoords[7][1]+5, y1=widgetCoords[7][2]+9, x2=widgetCoords[7][1]+11, y2=widgetCoords[7][2]+10}, -- Реактор 7
-    clickArea14 = {x1=widgetCoords[8][1]+5, y1=widgetCoords[8][2]+9, x2=widgetCoords[8][1]+11, y2=widgetCoords[8][2]+10}, -- Реактор 8
-    clickArea15 = {x1=widgetCoords[9][1]+5, y1=widgetCoords[9][2]+9, x2=widgetCoords[9][1]+11, y2=widgetCoords[9][2]+10}, -- Реактор 9
-    clickArea16 = {x1=widgetCoords[10][1]+5, y1=widgetCoords[10][2]+9, x2=widgetCoords[10][1]+11, y2=widgetCoords[10][2]+10}, -- Реактор 10
-    clickArea17 = {x1=widgetCoords[11][1]+5, y1=widgetCoords[11][2]+9, x2=widgetCoords[11][1]+11, y2=widgetCoords[11][2]+10}, -- Реактор 11
-    clickArea18 = {x1=widgetCoords[12][1]+5, y1=widgetCoords[12][2]+9, x2=widgetCoords[12][1]+11, y2=widgetCoords[12][2]+10}, -- Реактор 12
+    -- Координаты для кнопок на виджетах будут обновлены динамически
 }
+
+local function refreshWidgetClickAreas()
+    for i = 1, 12 do
+        local coords = widgetCoords[i]
+        local key = "clickArea" .. (6 + i)
+        if coords then
+            config[key] = {
+                x1 = coords[1] + 5,
+                y1 = coords[2] + 9,
+                x2 = coords[1] + 11,
+                y2 = coords[2] + 10,
+            }
+        else
+            config[key] = {x1 = 0, y1 = 0, x2 = -1, y2 = -1}
+        end
+    end
+end
+
+local function applyWidgetLayout()
+    if reactors <= 6 then
+        widgetCoords = compactWidgetCoords
+    else
+        widgetCoords = defaultWidgetCoords
+    end
+    refreshWidgetClickAreas()
+end
+
+refreshWidgetClickAreas()
 local colors = {
     bg = 0x202020,
     bg2 = 0x101010,
@@ -3982,6 +4006,7 @@ local function mainLoop()
     
     switchTheme(theme)
     initReactors()
+    applyWidgetLayout()
     initAdapters()
     local addr = initMe()
     initFlux()
@@ -4068,6 +4093,7 @@ local function mainLoop()
         if reactors > 0 and reactorsChanged() then
             os.sleep(1)
             initReactors()
+            applyWidgetLayout()
             drawDynamic()
             updateReactorData()
             message("Список реакторов обновлён", colors.textclr)
