@@ -102,7 +102,6 @@ local reactor_rods_filled = {}
 local reactor_rods_total = {}
 local reactor_rods_type = {}
 local reactor_rods_cache_at = {}
-local reactor_rods_callmode = {} -- address -> "noself" | "self"
 local reactor_rods_refresh_cursor = 1
 local adapters_proxy = {}
 local adapters_address = {}
@@ -699,38 +698,6 @@ local function callMethodFlexible(proxy, method, ...)
     return false, nil
 end
 
-local function callSelectStatusRod(proxy, idx)
-    if not proxy or not proxy.getSelectStatusRod then
-        return false, nil
-    end
-    local addr = proxy.address
-    local mode = addr and reactor_rods_callmode[addr] or nil
-    local fn = proxy.getSelectStatusRod
-
-    if mode == "noself" then
-        local ok, res = pcall(fn, idx)
-        if ok and res ~= nil then return true, res end
-        return false, nil
-    elseif mode == "self" then
-        local ok, res = pcall(fn, proxy, idx)
-        if ok and res ~= nil then return true, res end
-        return false, nil
-    end
-
-    -- detect mode once
-    local ok, res = pcall(fn, idx)
-    if ok and res ~= nil then
-        if addr then reactor_rods_callmode[addr] = "noself" end
-        return true, res
-    end
-    ok, res = pcall(fn, proxy, idx)
-    if ok and res ~= nil then
-        if addr then reactor_rods_callmode[addr] = "self" end
-        return true, res
-    end
-    return false, nil
-end
-
 local function secondsToHMS(totalSeconds)
     if type(totalSeconds) ~= "number" or totalSeconds < 0 then
         totalSeconds = 0
@@ -744,34 +711,6 @@ end
 local function getDepletionTime(num)
     if reactors == 0 then
         return 0
-    end
-
-    -- быстрый режим: если просят конкретный реактор — считаем только его
-    if num then
-        local i = tonumber(num)
-        if not i or i < 1 or i > reactors then
-            return 0
-        end
-        local rods = safeCallwg(reactors_proxy[i], "getAllFuelRodsStatus", nil)
-        local isFluid = reactor_type[i] == "Fluid"
-        if type(rods) ~= "table" or #rods == 0 then
-            reactor_depletionTime[i] = 0
-            return 0
-        end
-        local maxRod = 0
-        for _, rod in ipairs(rods) do
-            if type(rod) == "table" and rod[6] then
-                local fuelLeft = tonumber(rod[6]) or 0
-                if isFluid then
-                    fuelLeft = fuelLeft / 2
-                end
-                if fuelLeft > maxRod then
-                    maxRod = fuelLeft
-                end
-            end
-        end
-        reactor_depletionTime[i] = maxRod
-        return math.floor(maxRod or 0)
     end
 
     local minReactorTime = math.huge
@@ -877,109 +816,6 @@ local function formatRFwidgets(value)
     return "Ген: " .. str .. " " .. suffixes[i] .. "RF/t"
 end
 
-local function getRodTotalSlotsByLevel(level)
-    -- Из наблюдений: уровень 6 = 20 ячеек.
-    -- Для остальных уровней точное количество API не отдаёт.
-    if tonumber(level) == 6 then
-        return 20
-    end
-    return nil
-end
-
--- forward declaration (UI uses it before definition later in file)
-local getFuelRodsFromSelectStatus
-
-local function formatFuelTypeName(itemId)
-    itemId = tostring(itemId or "")
-    local lower = itemId:lower()
-    if lower:find("mox", 1, true) then
-        return "MOX"
-    end
-    if lower:find("uranium", 1, true) then
-        return "Уран"
-    end
-    if lower:find("thorium", 1, true) then
-        return "Торий"
-    end
-    if lower:find("plutonium", 1, true) then
-        return "Плутоний"
-    end
-    if lower:find("americium", 1, true) then
-        return "Америций"
-    end
-    if lower:find("neptun", 1, true) then
-        return "Нептуний"
-    end
-    local short = itemId:match(":(.+)$") or itemId
-    short = short:gsub("_", " ")
-    return short
-end
-
-local function refreshReactorRodsInfo(i)
-    if not reactors_proxy[i] then
-        reactor_rods_filled[i] = 0
-        reactor_rods_total[i] = getRodTotalSlotsByLevel(reactor_level[i])
-        reactor_rods_type[i] = "-"
-        reactor_rods_cache_at[i] = computer.uptime()
-        return
-    end
-
-    local agg = nil
-    if getFuelRodsFromSelectStatus then
-        local maxIdx = reactor_rods_total[i]
-        if type(maxIdx) ~= "number" or maxIdx <= 0 then
-            maxIdx = (tonumber(reactor_level[i]) == 6) and 20 or 64
-        end
-        agg = getFuelRodsFromSelectStatus(reactors_proxy[i], maxIdx)
-    end
-    local filled = 0
-    local mainType = nil
-    local mainSlots = 0
-    if agg and next(agg) ~= nil then
-        for k, e in pairs(agg) do
-            local slots = tonumber(e.slots) or tonumber(e.count) or 0
-            filled = filled + slots
-            if slots > mainSlots then
-                mainSlots = slots
-                mainType = k
-            end
-        end
-    end
-
-    reactor_rods_filled[i] = filled
-    reactor_rods_total[i] = getRodTotalSlotsByLevel(reactor_level[i])
-    reactor_rods_type[i] = mainType and formatFuelTypeName(mainType) or "-"
-    reactor_rods_cache_at[i] = computer.uptime()
-end
-
-local function ensureReactorRodsInfoFresh(i)
-    local now = computer.uptime()
-    local last = reactor_rods_cache_at[i]
-    -- обновляем редко: опрос стержней дорогой
-    if type(last) ~= "number" or (now - last) >= 20 then
-        local ok = pcall(refreshReactorRodsInfo, i)
-        if not ok then
-            -- никогда не роняем UI из‑за стержней
-            reactor_rods_filled[i] = reactor_rods_filled[i] or 0
-            reactor_rods_total[i] = reactor_rods_total[i] or getRodTotalSlotsByLevel(reactor_level[i])
-            reactor_rods_type[i] = reactor_rods_type[i] or "-"
-            reactor_rods_cache_at[i] = now
-        end
-    end
-end
-
-local function refreshOneReactorRods()
-    if reactors <= 0 then
-        return
-    end
-    if reactor_rods_refresh_cursor > reactors then
-        reactor_rods_refresh_cursor = 1
-    end
-    local idx = reactor_rods_refresh_cursor
-    reactor_rods_refresh_cursor = reactor_rods_refresh_cursor + 1
-    ensureReactorRodsInfoFresh(idx)
-end
-
 
 local function drawWidgets()
     if reactors <= 0 then
@@ -999,9 +835,6 @@ local function drawWidgets()
     end
 
     buffer.drawRectangle(5, 5, 114, 37, colors.bg4, 0, " ")
-
-    -- чтобы не фризить UI — обновляем стержни только для одного реактора за кадр
-    refreshOneReactorRods()
 
     for i = 1, math.min(reactors, #widgetCoords) do
         if reactor_aborted[i] == false then
@@ -1740,7 +1573,7 @@ local function extractCountFromKv(kv)
     )
 end
 
-getFuelRodsFromSelectStatus = function(proxy, maxIdx)
+local function getFuelRodsFromSelectStatus(proxy)
     -- Пытаемся получить состояние по каждому "индексу стержня".
     -- На практике метод есть в htc_reactors и требует integer index.
     if not proxy or not proxy.getSelectStatusRod then
@@ -1749,13 +1582,10 @@ getFuelRodsFromSelectStatus = function(proxy, maxIdx)
 
     local agg = {}
     local any = false
-    maxIdx = tonumber(maxIdx) or 64
-
-    local nilStreak = 0
-    for idx = 1, maxIdx do
-        local ok, rod = callSelectStatusRod(proxy, idx)
+    -- пробуем 0-based и 1-based индексы
+    for idx = 0, 64 do
+        local ok, rod = callMethodFlexible(proxy, "getSelectStatusRod", idx)
         if ok and type(rod) == "table" then
-            nilStreak = 0
             local kv = decodeKvArray(rod) or {}
             local itemId = tostring(kv.item or rod.itemName or rod.item or rod.name or "")
             if itemId == "" or itemId == "nil" then
@@ -1775,14 +1605,10 @@ getFuelRodsFromSelectStatus = function(proxy, maxIdx)
                 pct = fuel / maxFuel
             end
 
+            -- Если слот пустой, в некоторых реализациях item может быть nil/"" — пропускаем такие.
             if itemId ~= "" and itemId ~= "nil" and itemId ~= "unknown" then
                 addFuelRodAggPercent(agg, itemId, cnt, pct)
                 any = true
-            end
-        else
-            nilStreak = nilStreak + 1
-            if nilStreak >= 4 and idx >= 4 then
-                break
             end
         end
     end
@@ -1791,6 +1617,99 @@ getFuelRodsFromSelectStatus = function(proxy, maxIdx)
         return agg
     end
     return nil
+end
+
+local function getRodTotalSlotsByLevel(level)
+    -- По твоей схеме: уровень 6 = 20 ячеек под стержни.
+    -- Для остальных уровней точное количество API не отдаёт.
+    if tonumber(level) == 6 then
+        return 20
+    end
+    return nil
+end
+
+local function formatFuelTypeName(itemId)
+    itemId = tostring(itemId or "")
+    local lower = itemId:lower()
+    if lower:find("mox", 1, true) then
+        return "MOX"
+    end
+    if lower:find("uranium", 1, true) then
+        return "Уран"
+    end
+    if lower:find("thorium", 1, true) then
+        return "Торий"
+    end
+    if lower:find("plutonium", 1, true) then
+        return "Плутоний"
+    end
+    if lower:find("americium", 1, true) then
+        return "Америций"
+    end
+    if lower:find("neptun", 1, true) then
+        return "Нептуний"
+    end
+    local short = itemId:match(":(.+)$") or itemId
+    short = short:gsub("_", " ")
+    return short
+end
+
+local function refreshReactorRodsInfo(i)
+    local proxy = reactors_proxy[i]
+    if not proxy then
+        reactor_rods_filled[i] = 0
+        reactor_rods_total[i] = getRodTotalSlotsByLevel(reactor_level[i])
+        reactor_rods_type[i] = "-"
+        reactor_rods_cache_at[i] = computer.uptime()
+        return
+    end
+
+    local agg = getFuelRodsFromSelectStatus(proxy)
+    local filled = 0
+    local mainType = nil
+    local mainSlots = 0
+    if agg and next(agg) ~= nil then
+        for k, e in pairs(agg) do
+            local slots = tonumber(e.slots) or tonumber(e.count) or 0
+            filled = filled + slots
+            if slots > mainSlots then
+                mainSlots = slots
+                mainType = k
+            end
+        end
+    end
+
+    reactor_rods_filled[i] = filled
+    reactor_rods_total[i] = getRodTotalSlotsByLevel(reactor_level[i])
+    reactor_rods_type[i] = mainType and formatFuelTypeName(mainType) or "-"
+    reactor_rods_cache_at[i] = computer.uptime()
+end
+
+local function ensureReactorRodsInfoFresh(i)
+    local now = computer.uptime()
+    local last = reactor_rods_cache_at[i]
+    -- опрос стержней дорогой, обновляем редко
+    if type(last) ~= "number" or (now - last) >= 15 then
+        local ok = pcall(refreshReactorRodsInfo, i)
+        if not ok then
+            reactor_rods_filled[i] = reactor_rods_filled[i] or 0
+            reactor_rods_total[i] = reactor_rods_total[i] or getRodTotalSlotsByLevel(reactor_level[i])
+            reactor_rods_type[i] = reactor_rods_type[i] or "-"
+            reactor_rods_cache_at[i] = now
+        end
+    end
+end
+
+local function refreshOneReactorRods()
+    if reactors <= 0 then
+        return
+    end
+    if reactor_rods_refresh_cursor > reactors then
+        reactor_rods_refresh_cursor = 1
+    end
+    local idx = reactor_rods_refresh_cursor
+    reactor_rods_refresh_cursor = reactor_rods_refresh_cursor + 1
+    ensureReactorRodsInfoFresh(idx)
 end
 
 local function getFuelRodsFromStatus(proxy)
@@ -2233,6 +2152,23 @@ local function drawStatus(num)
 
     -- Сдвиг x с 88 на 90
     buffer.drawText(90, 46, colors.textclr, "Кол-во реакторов: " .. reactors)
+    -- Суммарные стержни по комплексу (по заполненным ячейкам + известный максимум)
+    local sumFilled = 0
+    local sumTotal = 0
+    local hasTotal = false
+    for i = 1, reactors do
+        sumFilled = sumFilled + (tonumber(reactor_rods_filled[i]) or 0)
+        local t = reactor_rods_total[i]
+        if type(t) == "number" and t > 0 then
+            sumTotal = sumTotal + t
+            hasTotal = true
+        end
+    end
+    local rodsStatus = "Стержни: " .. tostring(sumFilled)
+    if hasTotal and sumTotal > 0 then
+        rodsStatus = rodsStatus .. "/" .. tostring(sumTotal)
+    end
+    buffer.drawText(90, 49, colors.textclr, rodsStatus)
 
     if any_reactor_on == true then
         -- Сдвиг координат индикатора (110->112, 111->113, 115->117)
@@ -2452,6 +2388,7 @@ local function updateReactorData(num)
         reactor_type[i]     = safeCall(proxy, "isActiveCooling", false) and "Fluid" or "Air"
         reactor_rf[i]       = safeCall(proxy, "getEnergyGeneration", 0)
         reactor_work[i]     = safeCall(proxy, "hasWork", false)
+        reactor_level[i]    = getReactorLevel(proxy)
 
         if reactor_type[i] == "Fluid" then
             reactor_getcoolant[i] = safeCall(proxy, "getFluidCoolant", 0) or 0
@@ -4219,12 +4156,18 @@ local function mainLoop()
                         if proxy and proxy.hasWork then
                             reactor_work[i] = safeCall(proxy, "hasWork", false)
                             reactor_type[i] = safeCall(proxy, "isActiveCooling", false) and "Fluid" or "Air"
+                            reactor_level[i] = getReactorLevel(proxy)
                         else
                             reactor_work[i] = false
                         end
                         
                     end
                 end
+            end
+
+            -- Обновляем инфу по стержням очень дозированно: один реактор за секунду
+            if second % 1 == 0 then
+                refreshOneReactorRods()
             end
 
             for i = 1, reactors do
