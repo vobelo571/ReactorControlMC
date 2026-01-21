@@ -745,7 +745,7 @@ local function getDepletionTime(num)
         return 0
     end
 
-    -- быстрый режим: если просят конкретный реактор — считаем только его (важно для производительности UI)
+    -- быстрый режим: если просят конкретный реактор — считаем только его
     if num then
         local i = tonumber(num)
         if not i or i < 1 or i > reactors then
@@ -1737,7 +1737,6 @@ getFuelRodsFromSelectStatus = function(proxy, maxIdx)
     local any = false
     maxIdx = tonumber(maxIdx) or 64
 
-    -- основной режим: 1-based индексы (у тебя так работает)
     local nilStreak = 0
     for idx = 1, maxIdx do
         local ok, rod = callSelectStatusRod(proxy, idx)
@@ -1762,32 +1761,14 @@ getFuelRodsFromSelectStatus = function(proxy, maxIdx)
                 pct = fuel / maxFuel
             end
 
-            -- Если слот пустой, в некоторых реализациях item может быть nil/"" — пропускаем такие.
             if itemId ~= "" and itemId ~= "nil" and itemId ~= "unknown" then
                 addFuelRodAggPercent(agg, itemId, cnt, pct)
                 any = true
             end
         else
             nilStreak = nilStreak + 1
-            -- если подряд много nil — дальше смысла нет (экономим вызовы)
             if nilStreak >= 4 and idx >= 4 then
                 break
-            end
-        end
-    end
-
-    -- совместимость: иногда индекс 0 используется как первый
-    if not any then
-        local ok0, rod0 = callSelectStatusRod(proxy, 0)
-        if ok0 and type(rod0) == "table" then
-            local kv = decodeKvArray(rod0) or {}
-            local itemId = tostring(kv.item or rod0.itemName or rod0.item or rod0.name or "")
-            if itemId == "" or itemId == "nil" then
-                itemId = tostring(extractFirstStringWithColon(rod0) or "unknown")
-            end
-            if itemId ~= "" and itemId ~= "nil" and itemId ~= "unknown" then
-                addFuelRodAggPercent(agg, itemId, 1, nil)
-                any = true
             end
         end
     end
