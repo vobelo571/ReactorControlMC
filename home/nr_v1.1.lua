@@ -883,7 +883,7 @@ local function drawWidgets()
             local resTxt = (type(res) == "number") and string.format("%.0f", res * 100) or "-"
             local rodsLine
             if slots ~= nil and eff ~= nil then
-                rodsLine = "Стерж:" .. tostring(eff) .. " (" .. tostring(slots) .. "x" .. tostring(lvl) .. ")"
+                rodsLine = "Стерж: " .. tostring(eff) .. "
             else
                 rodsLine = "Стерж: - (Сл -, У " .. tostring(lvl) .. ")"
             end
