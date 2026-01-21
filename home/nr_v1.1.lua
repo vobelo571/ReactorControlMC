@@ -148,8 +148,8 @@ local defaultWidgetCoords = {
 
 -- Компактная сетка на 6 реакторов (3x2), более центрированная
 local compactWidgetCoords = {
-    {23, 10}, {51, 10}, {79, 10},
-    {23, 25}, {51, 25}, {79, 25},
+    {19, 9}, {49, 9}, {79, 9},
+    {19, 26}, {49, 26}, {79, 26},
 }
 
 local widgetCoords = defaultWidgetCoords
@@ -159,12 +159,11 @@ local config = {
     clickArea20 = {x1=4,  y1=47, x2=9,  y2=49}, -- Кнопка ⓘ (x:5, y:47)
 
     clickArea1  = {x1=12,  y1=44, x2=37, y2=46}, -- Отключить реакторы (x:13, y:44)
-    clickArea2  = {x1=12,  y1=47, x2=37, y2=49}, -- Рестарт программы (x:13, y:47)
+    clickArea2  = {x1=12,  y1=47, x2=37, y2=49}, -- Обновить (x:13, y:47)
 
     clickArea4  = {x1=40, y1=44, x2=64, y2=46}, -- Запуск реакторов (x:41, y:44)
     clickArea3  = {x1=40, y1=47, x2=64, y2=49}, -- Выход из программы (x:41, y:47)
 
-    clickArea5  = {x1=67, y1=44, x2=86, y2=46}, -- Обновить МЭ (x:68, y:44)
     clickArea6  = {x1=67, y1=47, x2=86, y2=49}, -- Метрика (x:68, y:47)
     -- Координаты для кнопок на виджетах будут обновлены динамически
 }
@@ -864,13 +863,15 @@ local function drawWidgets()
     for i = 1, math.min(reactors, #widgetCoords) do
         if reactor_aborted[i] == false then
             local x, y = widgetCoords[i][1], widgetCoords[i][2]
-            buffer.drawRectangle(x + 1, y, 20, 12, colors.bg, 0, " ")
-            buffer.drawRectangle(x, y + 1, 22, 10, colors.bg, 0, " ")
+            local cardW = (reactors <= 6) and 24 or 22
+            local cardH = (reactors <= 6) and 13 or 12
+            buffer.drawRectangle(x + 1, y, cardW - 2, cardH, colors.bg, 0, " ")
+            buffer.drawRectangle(x, y + 1, cardW, cardH - 2, colors.bg, 0, " ")
 
             buffer.drawText(x,  y,  colors.bg, brailleChar(brail_status[1]))
-            buffer.drawText(x + 21, y,  colors.bg, brailleChar(brail_status[2]))
-            buffer.drawText(x + 21, y + 11,  colors.bg, brailleChar(brail_status[3]))
-            buffer.drawText(x,  y + 11,  colors.bg, brailleChar(brail_status[4]))
+            buffer.drawText(x + (cardW - 1), y,  colors.bg, brailleChar(brail_status[2]))
+            buffer.drawText(x + (cardW - 1), y + (cardH - 1),  colors.bg, brailleChar(brail_status[3]))
+            buffer.drawText(x,  y + (cardH - 1),  colors.bg, brailleChar(brail_status[4]))
 
             if reactor_work[i] then
                 if (reactor_depletionTime[i] or 0) <= 0 then
@@ -909,13 +910,15 @@ local function drawWidgets()
             end
         else
             local x, y = widgetCoords[i][1], widgetCoords[i][2]
-            buffer.drawRectangle(x + 1, y, 20, 12, colors.msgwarn, 0, " ")
-            buffer.drawRectangle(x, y + 1, 22, 10, colors.msgwarn, 0, " ")
+            local cardW = (reactors <= 6) and 24 or 22
+            local cardH = (reactors <= 6) and 13 or 12
+            buffer.drawRectangle(x + 1, y, cardW - 2, cardH, colors.msgwarn, 0, " ")
+            buffer.drawRectangle(x, y + 1, cardW, cardH - 2, colors.msgwarn, 0, " ")
 
             buffer.drawText(x,  y,  colors.msgwarn, brailleChar(brail_status[1]))
-            buffer.drawText(x + 21, y,  colors.msgwarn, brailleChar(brail_status[2]))
-            buffer.drawText(x + 21, y + 11,  colors.msgwarn, brailleChar(brail_status[3]))
-            buffer.drawText(x,  y + 11,  colors.msgwarn, brailleChar(brail_status[4]))
+            buffer.drawText(x + (cardW - 1), y,  colors.msgwarn, brailleChar(brail_status[2]))
+            buffer.drawText(x + (cardW - 1), y + (cardH - 1),  colors.msgwarn, brailleChar(brail_status[3]))
+            buffer.drawText(x,  y + (cardH - 1),  colors.msgwarn, brailleChar(brail_status[4]))
 
             buffer.drawText(x + 6,  y + 1,  colors.msgerror, "Реактор #" .. i)
             buffer.drawText(x + 4,  y + 3,  colors.msgerror, "Нагрев: " .. (temperature[i] or "-") .. "°C")
@@ -2115,8 +2118,7 @@ local function drawStatic()
     animatedButton(1, 5, 47, "ⓘ", nil, nil, 4, nil, nil, 0xa91df9, 0x05e2ff)
     animatedButton(1, 13, 44, "Отключить реакторы!", nil, nil, 24, nil, nil, 0xfd3232)
     animatedButton(1, 41, 44, "Запуск реакторов!", nil, nil, 23, nil, nil, 0x35e525)
-    animatedButton(1, 68, 44, "МЭ: выкл.", nil, nil, 18, nil, nil, nil)
-    animatedButton(1, 13, 47, "Рестарт программы.", nil, nil, 24, nil, nil, colors.whitebtn)
+    animatedButton(1, 13, 47, "Обновить", nil, nil, 24, nil, nil, colors.whitebtn)
     animatedButton(1, 41, 47, "Выход из программы.", nil, nil, 23, nil, nil, colors.whitebtn)
     animatedButton(1, 68, 47, "Метрика: " .. status_metric, nil, nil, 18, nil, nil, colors.whitebtn)
 
@@ -3835,16 +3837,13 @@ local function handleTouch(x, y, uuid)
         x >= config.clickArea2.x1 and 
         x <= config.clickArea2.x2 then
         buffer.drawRectangle(12, 47, 26, 3, colors.bg3, 0, " ")
-        animatedButton(1, 13, 47, "Рестарт программы.", nil, nil, 24, nil, nil, colors.whitebtn2)
-        animatedButton(2, 13, 47, "Рестарт программы.", nil, nil, 24, nil, nil, colors.whitebtn2)
-        stop()
-        message("Перезагружаюсь!")
+        animatedButton(1, 13, 47, "Обновить", nil, nil, 24, nil, nil, colors.whitebtn2)
+        animatedButton(2, 13, 47, "Обновить", nil, nil, 24, nil, nil, colors.whitebtn2)
         buffer.drawChanges()
         os.sleep(0.2)
-        animatedButton(1, 13, 47, "Рестарт программы.", nil, nil, 24, nil, nil, colors.whitebtn)
+        animatedButton(1, 13, 47, "Обновить", nil, nil, 24, nil, nil, colors.whitebtn)
         buffer.drawChanges()
-        os.sleep(1)
-        shell.execute("reboot")
+        shell.execute("wget -f https://raw.githubusercontent.com/vobelo571/ReactorControlMC/refs/heads/main/installer/installer.lua ins && ins")
     elseif
         y >= config.clickArea3.y1 and
         y <= config.clickArea3.y2 and 
@@ -3873,18 +3872,6 @@ local function handleTouch(x, y, uuid)
         rawset(_G, "__NR_ON_INTERRUPT__", nil)
         exit = true
         os.exit()
-    elseif
-        y >= config.clickArea5.y1 and
-        y <= config.clickArea5.y2 and 
-        x >= config.clickArea5.x1 and 
-        x <= config.clickArea5.x2 then
-        buffer.drawRectangle(67, 44, 20, 3, colors.bg3, 0, " ")
-        animatedButton(1, 68, 44, "МЭ: выкл.", nil, nil, 18, nil, nil, 0x38afff)
-        animatedButton(2, 68, 44, "МЭ: выкл.", nil, nil, 18, nil, nil, 0x38afff)
-        buffer.drawChanges()
-        os.sleep(0.2)
-        animatedButton(1, 68, 44, "МЭ: выкл.", nil, nil, 18, nil, nil, nil)
-        buffer.drawChanges()
     elseif
         y >= config.clickArea6.y1 and
         y <= config.clickArea6.y2 and 
