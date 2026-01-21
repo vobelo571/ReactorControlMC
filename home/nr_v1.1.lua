@@ -99,15 +99,17 @@ local reactor_depletionTime = {}
 local reactor_ConsumptionPerSecond = {}
 local reactor_level = {}
 -- Короткая сводка по стержням (обновляется постепенно)
-local reactor_rods_slots = {}
-local reactor_rods_effective = {}
-local reactor_rods_res_avg = {}
-local reactor_rods_res_min = {}
-local reactor_rods_res_max = {}
-local reactor_rods_last_update = {}
-local rods_update_interval = 10 -- секунд между обновлениями для каждого реактора
-local rods_scan_reactor = 1
-local rods_cache_disabled = false
+local rods_cache = {
+    slots = {},
+    effective = {},
+    res_avg = {},
+    res_min = {},
+    res_max = {},
+    last_update = {},
+    update_interval = 10, -- секунд между обновлениями для каждого реактора
+    scan_reactor = 1,
+    disabled = false,
+}
 local adapters_proxy = {}
 local adapters_address = {}
 local reactor_adapter_index = {}
@@ -875,9 +877,9 @@ local function drawWidgets()
             buffer.drawText(x + 4,  y + 6,  colors.textclr, "Распад: " .. secondsToHMS(reactor_depletionTime[i] or 0))
             -- Короткая сводка по стержням
             local lvl = reactor_level[i] or 1
-            local slots = reactor_rods_slots[i]
-            local eff = reactor_rods_effective[i]
-            local res = reactor_rods_res_avg[i]
+            local slots = rods_cache.slots[i]
+            local eff = rods_cache.effective[i]
+            local res = rods_cache.res_avg[i]
             local resTxt = (type(res) == "number") and string.format("%.0f", res * 100) or "-"
             local rodsLine
             if slots ~= nil and eff ~= nil then
@@ -1921,17 +1923,17 @@ local function updateRodsCacheStep()
     if reactors <= 0 then
         return
     end
-    if rods_scan_reactor < 1 or rods_scan_reactor > reactors then
-        rods_scan_reactor = 1
+    if rods_cache.scan_reactor < 1 or rods_cache.scan_reactor > reactors then
+        rods_cache.scan_reactor = 1
     end
 
-    local i = rods_scan_reactor
+    local i = rods_cache.scan_reactor
     local now = computer.uptime()
-    local last = reactor_rods_last_update[i] or 0
-    if now - last < rods_update_interval then
-        rods_scan_reactor = i + 1
-        if rods_scan_reactor > reactors then
-            rods_scan_reactor = 1
+    local last = rods_cache.last_update[i] or 0
+    if now - last < rods_cache.update_interval then
+        rods_cache.scan_reactor = i + 1
+        if rods_cache.scan_reactor > reactors then
+            rods_cache.scan_reactor = 1
         end
         return
     end
@@ -1940,24 +1942,24 @@ local function updateRodsCacheStep()
     if slots then
         local lvl = reactor_level[i] or getReactorLevel(reactors_proxy[i]) or 1
         reactor_level[i] = lvl
-        reactor_rods_slots[i] = slots
-        reactor_rods_effective[i] = slots * (tonumber(lvl) or 1)
-        reactor_rods_res_avg[i] = avgP
-        reactor_rods_res_min[i] = minP
-        reactor_rods_res_max[i] = maxP
-        reactor_rods_last_update[i] = now
+        rods_cache.slots[i] = slots
+        rods_cache.effective[i] = slots * (tonumber(lvl) or 1)
+        rods_cache.res_avg[i] = avgP
+        rods_cache.res_min[i] = minP
+        rods_cache.res_max[i] = maxP
+        rods_cache.last_update[i] = now
     else
-        reactor_rods_slots[i] = nil
-        reactor_rods_effective[i] = nil
-        reactor_rods_res_avg[i] = nil
-        reactor_rods_res_min[i] = nil
-        reactor_rods_res_max[i] = nil
-        reactor_rods_last_update[i] = now
+        rods_cache.slots[i] = nil
+        rods_cache.effective[i] = nil
+        rods_cache.res_avg[i] = nil
+        rods_cache.res_min[i] = nil
+        rods_cache.res_max[i] = nil
+        rods_cache.last_update[i] = now
     end
 
-    rods_scan_reactor = i + 1
-    if rods_scan_reactor > reactors then
-        rods_scan_reactor = 1
+    rods_cache.scan_reactor = i + 1
+    if rods_cache.scan_reactor > reactors then
+        rods_cache.scan_reactor = 1
     end
 end
 
@@ -3967,13 +3969,14 @@ local function mainLoop()
     adapters_address = {}
     reactor_adapter_index = {}
     reactor_level = {}
-    reactor_rods_slots = {}
-    reactor_rods_effective = {}
-    reactor_rods_res_avg = {}
-    reactor_rods_res_min = {}
-    reactor_rods_res_max = {}
-    reactor_rods_last_update = {}
-    rods_scan_reactor = 1
+    rods_cache.slots = {}
+    rods_cache.effective = {}
+    rods_cache.res_avg = {}
+    rods_cache.res_min = {}
+    rods_cache.res_max = {}
+    rods_cache.last_update = {}
+    rods_cache.scan_reactor = 1
+    rods_cache.disabled = false
     
     me_proxy = nil
     me_network = false
@@ -4095,10 +4098,10 @@ local function mainLoop()
         if now - lastTime >= 1 then
             lastTime = now
             second = second + 1
-            if rods_cache_disabled == false then
+            if rods_cache.disabled == false then
                 local ok = pcall(updateRodsCacheStep)
                 if not ok then
-                    rods_cache_disabled = true
+                    rods_cache.disabled = true
                 end
             end
             if work == true then
