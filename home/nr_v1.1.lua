@@ -107,6 +107,7 @@ local reactor_rods_res_max = {}
 local reactor_rods_last_update = {}
 local rods_update_interval = 10 -- секунд между обновлениями для каждого реактора
 local rods_scan_reactor = 1
+local rods_cache_disabled = false
 local adapters_proxy = {}
 local adapters_address = {}
 local reactor_adapter_index = {}
@@ -4094,7 +4095,12 @@ local function mainLoop()
         if now - lastTime >= 1 then
             lastTime = now
             second = second + 1
-            updateRodsCacheStep()
+            if rods_cache_disabled == false then
+                local ok = pcall(updateRodsCacheStep)
+                if not ok then
+                    rods_cache_disabled = true
+                end
+            end
             if work == true then
                 if second % 5 == 0 then
                     for i = 1, reactors do
