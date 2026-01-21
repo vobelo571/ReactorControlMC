@@ -698,6 +698,38 @@ local function callMethodFlexible(proxy, method, ...)
     return false, nil
 end
 
+local function callSelectStatusRod(proxy, idx)
+    if not proxy or not proxy.getSelectStatusRod then
+        return false, nil
+    end
+    local addr = proxy.address
+    local mode = addr and reactor_rods_callmode[addr] or nil
+    local fn = proxy.getSelectStatusRod
+
+    if mode == "noself" then
+        local ok, res = pcall(fn, idx)
+        if ok and res ~= nil then return true, res end
+        return false, nil
+    elseif mode == "self" then
+        local ok, res = pcall(fn, proxy, idx)
+        if ok and res ~= nil then return true, res end
+        return false, nil
+    end
+
+    -- detect mode once
+    local ok, res = pcall(fn, idx)
+    if ok and res ~= nil then
+        if addr then reactor_rods_callmode[addr] = "noself" end
+        return true, res
+    end
+    ok, res = pcall(fn, proxy, idx)
+    if ok and res ~= nil then
+        if addr then reactor_rods_callmode[addr] = "self" end
+        return true, res
+    end
+    return false, nil
+end
+
 local function secondsToHMS(totalSeconds)
     if type(totalSeconds) ~= "number" or totalSeconds < 0 then
         totalSeconds = 0
@@ -713,8 +745,7 @@ local function getDepletionTime(num)
         return 0
     end
 
-    -- КРИТИЧНО ДЛЯ ПРОИЗВОДИТЕЛЬНОСТИ:
-    -- если передан num — считаем только для одного реактора (без цикла по всем).
+    -- быстрый режим: если просят конкретный реактор — считаем только его (важно для производительности UI)
     if num then
         local i = tonumber(num)
         if not i or i < 1 or i > reactors then
@@ -742,8 +773,8 @@ local function getDepletionTime(num)
         return math.floor(maxRod or 0)
     end
 
-    -- fallback: старое поведение "минимум по всем"
     local minReactorTime = math.huge
+    
     if #reactor_depletionTime == 0 then
         for i = 1, reactors do
             reactor_depletionTime[i] = 0
@@ -754,10 +785,12 @@ local function getDepletionTime(num)
         local rods = safeCallwg(reactors_proxy[i], "getAllFuelRodsStatus", nil)
         local isFluid = reactor_type[i] == "Fluid"
         local reactorTime = 0
+
         if type(rods) == "table" and #rods > 0 then
             local maxRod = 0
             for _, rod in ipairs(rods) do
                 if type(rod) == "table" and rod[6] then
+                    -- Добавлена проверка на число
                     local fuelLeft = tonumber(rod[6]) or 0
                     if isFluid then
                         fuelLeft = fuelLeft / 2
@@ -767,8 +800,10 @@ local function getDepletionTime(num)
                     end
                 end
             end
+
             reactorTime = maxRod
             reactor_depletionTime[i] = reactorTime
+            
             if reactorTime > 0 and reactorTime < minReactorTime then
                 minReactorTime = reactorTime
             end
@@ -779,8 +814,9 @@ local function getDepletionTime(num)
 
     if minReactorTime == math.huge then
         return 0
+    else
+        return math.floor(minReactorTime or 0)
     end
-    return math.floor(minReactorTime or 0)
 end
 
 local function drawVerticalProgressBar(x, y, height, value, maxValue, colorBottom, colorTop, colorInactive)
@@ -889,7 +925,10 @@ local function refreshReactorRodsInfo(i)
 
     local agg = nil
     if getFuelRodsFromSelectStatus then
-        local maxIdx = (tonumber(reactor_level[i]) == 6) and 20 or 64
+        local maxIdx = reactor_rods_total[i]
+        if type(maxIdx) ~= "number" or maxIdx <= 0 then
+            maxIdx = (tonumber(reactor_level[i]) == 6) and 20 or 64
+        end
         agg = getFuelRodsFromSelectStatus(reactors_proxy[i], maxIdx)
     end
     local filled = 0
@@ -1687,38 +1726,6 @@ local function extractCountFromKv(kv)
     )
 end
 
-local function callSelectStatusRod(proxy, idx)
-    if not proxy or not proxy.getSelectStatusRod then
-        return false, nil
-    end
-    local addr = proxy.address
-    local mode = addr and reactor_rods_callmode[addr] or nil
-    local fn = proxy.getSelectStatusRod
-
-    if mode == "noself" then
-        local ok, res = pcall(fn, idx)
-        if ok and res ~= nil then return true, res end
-        return false, nil
-    elseif mode == "self" then
-        local ok, res = pcall(fn, proxy, idx)
-        if ok and res ~= nil then return true, res end
-        return false, nil
-    end
-
-    -- detect mode
-    local ok, res = pcall(fn, idx)
-    if ok and res ~= nil then
-        if addr then reactor_rods_callmode[addr] = "noself" end
-        return true, res
-    end
-    ok, res = pcall(fn, proxy, idx)
-    if ok and res ~= nil then
-        if addr then reactor_rods_callmode[addr] = "self" end
-        return true, res
-    end
-    return false, nil
-end
-
 getFuelRodsFromSelectStatus = function(proxy, maxIdx)
     -- Пытаемся получить состояние по каждому "индексу стержня".
     -- На практике метод есть в htc_reactors и требует integer index.
@@ -1729,10 +1736,13 @@ getFuelRodsFromSelectStatus = function(proxy, maxIdx)
     local agg = {}
     local any = false
     maxIdx = tonumber(maxIdx) or 64
-    -- в этой сборке индексация 1-based, но оставляем 0 как совместимость
-    for idx = 0, maxIdx do
+
+    -- основной режим: 1-based индексы (у тебя так работает)
+    local nilStreak = 0
+    for idx = 1, maxIdx do
         local ok, rod = callSelectStatusRod(proxy, idx)
         if ok and type(rod) == "table" then
+            nilStreak = 0
             local kv = decodeKvArray(rod) or {}
             local itemId = tostring(kv.item or rod.itemName or rod.item or rod.name or "")
             if itemId == "" or itemId == "nil" then
@@ -1755,6 +1765,28 @@ getFuelRodsFromSelectStatus = function(proxy, maxIdx)
             -- Если слот пустой, в некоторых реализациях item может быть nil/"" — пропускаем такие.
             if itemId ~= "" and itemId ~= "nil" and itemId ~= "unknown" then
                 addFuelRodAggPercent(agg, itemId, cnt, pct)
+                any = true
+            end
+        else
+            nilStreak = nilStreak + 1
+            -- если подряд много nil — дальше смысла нет (экономим вызовы)
+            if nilStreak >= 4 and idx >= 4 then
+                break
+            end
+        end
+    end
+
+    -- совместимость: иногда индекс 0 используется как первый
+    if not any then
+        local ok0, rod0 = callSelectStatusRod(proxy, 0)
+        if ok0 and type(rod0) == "table" then
+            local kv = decodeKvArray(rod0) or {}
+            local itemId = tostring(kv.item or rod0.itemName or rod0.item or rod0.name or "")
+            if itemId == "" or itemId == "nil" then
+                itemId = tostring(extractFirstStringWithColon(rod0) or "unknown")
+            end
+            if itemId ~= "" and itemId ~= "nil" and itemId ~= "unknown" then
+                addFuelRodAggPercent(agg, itemId, 1, nil)
                 any = true
             end
         end
@@ -3494,7 +3526,7 @@ local function handleChatCommand(nick, msg, args)
                     local filled = 0
                     local total = 0
                     for idx = 0, 64 do
-                        local ok, r = callSelectStatusRod(reactors_proxy[i], idx)
+                        local ok, r = callMethodFlexible(reactors_proxy[i], "getSelectStatusRod", idx)
                         if ok and type(r) == "table" then
                             total = total + 1
                             local kv = decodeKvArray(r) or {}
