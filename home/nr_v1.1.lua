@@ -101,6 +101,7 @@ local reactor_level = {}
 -- Короткая сводка по стержням (обновляется постепенно)
 local rods_cache = {
     res_avg = {},
+    type_line = {},
     last_update = {},
     update_interval = 20, -- секунд между обновлениями для каждого реактора
     scan_reactor = 1,
@@ -872,6 +873,12 @@ local function drawWidgets()
             local res = rods_cache.res_avg[i]
             local resTxt = (type(res) == "number") and string.format("%.0f", res * 100) or "-"
             buffer.drawText(x + 4,  y + 7,  colors.textclr, shortenText("Ресурс: " .. tostring(resTxt) .. "%", 18))
+            local typeLine = rods_cache.type_line[i]
+            if typeLine then
+                buffer.drawText(x + 4,  y + 8,  colors.textclr, shortenText(typeLine, 18))
+            else
+                buffer.drawText(x + 4,  y + 8,  colors.textclr, shortenText("Тип: -", 18))
+            end
             animatedButton(1, x + 6, y + 9, (reactor_work[i] and "Отключить" or "Включить"), nil, nil, 10, nil, nil, (reactor_work[i] and 0xfd3232 or 0x2beb1a))
             if reactor_type[i] == "Fluid" then
                 drawVerticalProgressBar(x + 1, y + 1, 9, reactor_getcoolant[i], reactor_maxcoolant[i], 0x0044FF, 0x00C8FF, colors.bg2)
@@ -1874,6 +1881,7 @@ local function computeRodsResourceForReactor(i)
 
     local sumP = 0
     local nP = 0
+    local typeSet = {}
 
     for _, e in pairs(agg) do
         if e.pN and e.pN > 0 then
@@ -1882,7 +1890,44 @@ local function computeRodsResourceForReactor(i)
         end
     end
 
-    return (nP > 0) and (sumP / nP) or nil
+    for itemId, _ in pairs(agg) do
+        local name = tostring(itemId or ""):lower()
+        local label = nil
+        if name:find("mox", 1, true) then
+            label = "MOX"
+        elseif name:find("uranium", 1, true) then
+            label = "Уран"
+        elseif name:find("plutonium", 1, true) then
+            label = "Плутоний"
+        elseif name:find("thorium", 1, true) then
+            label = "Торий"
+        end
+
+        if not label or label == "" then
+            -- fallback: часть после ':' и слегка нормализуем
+            local tail = name:match(":(.+)$") or name
+            tail = tail:gsub("_", " ")
+            if tail ~= "" then
+                label = tail
+            end
+        end
+
+        if label and label ~= "" then
+            typeSet[label] = true
+        end
+    end
+
+    local types = {}
+    for k in pairs(typeSet) do
+        table.insert(types, k)
+    end
+    table.sort(types)
+    local typeLine = nil
+    if #types > 0 then
+        typeLine = "Тип: " .. table.concat(types, "/")
+    end
+
+    return (nP > 0) and (sumP / nP) or nil, typeLine
 end
 
 local function updateRodsCacheStep()
@@ -1904,8 +1949,9 @@ local function updateRodsCacheStep()
         return
     end
 
-    local avgP = computeRodsResourceForReactor(i)
+    local avgP, typeLine = computeRodsResourceForReactor(i)
     rods_cache.res_avg[i] = avgP
+    rods_cache.type_line[i] = typeLine
     rods_cache.last_update[i] = now
 
     rods_cache.scan_reactor = i + 1
@@ -3918,6 +3964,7 @@ local function mainLoop()
     reactor_adapter_index = {}
     reactor_level = {}
     rods_cache.res_avg = {}
+    rods_cache.type_line = {}
     rods_cache.last_update = {}
     rods_cache.scan_reactor = 1
     rods_cache.disabled = false
