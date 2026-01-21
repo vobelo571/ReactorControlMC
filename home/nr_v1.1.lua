@@ -2445,15 +2445,15 @@ local function start(num)
                 message("Реактор #" .. i .. " (воздушный) запущен!", colors.msginfo, 34)
             end
         end
-        -- Обновление кеша стержней:
-        -- - при запуске ОДНОГО реактора можно обновить сразу
-        -- - при массовом запуске обновляем плавно в mainLoop, иначе возможны фризы/краши
+        -- Кеш стержней:
+        -- - при запуске одного реактора можно обновить сразу
+        -- - при массовом запуске НЕ обновляем тут (иначе краш/лаги), обновление пойдёт постепенно в mainLoop
         if num then
             pcall(updateRodsCache, i)
-        else
-            reactor_rods_last_update[i] = 0
         end
     end
+
+    -- Если запускали все реакторы, включаем плавное сканирование кеша стержней
     if not num then
         rods_scanning = true
         rods_scan_index = 1
@@ -4158,14 +4158,7 @@ local function mainLoop()
                     if rods_scan_index < 1 or rods_scan_index > reactors then
                         rods_scan_index = 1
                     end
-                    -- Чтобы лишний раз не нагружать: опрашиваем только
-                    -- - запущенные реакторы, или
-                    -- - те, у кого кеш ещё ни разу не обновлялся/помечен на обновление (0)
-                    local idx = rods_scan_index
-                    local lastUpd = reactor_rods_last_update[idx]
-                    if reactor_work[idx] == true or lastUpd == nil or lastUpd == 0 then
-                        pcall(updateRodsCache, idx)
-                    end
+                    pcall(updateRodsCache, rods_scan_index)
                     rods_scan_index = rods_scan_index + 1
                     if rods_scan_index > reactors then
                         rods_scanning = false
