@@ -1302,6 +1302,51 @@ local function getFuelRodsFromStatus(proxy)
 end
 
 local function computeRodsResourceForReactor(i)
+    local function rodTypeLabelFromItemId(itemId)
+        local name = tostring(itemId or ""):lower()
+        if name == "" then
+            return nil
+        end
+
+        -- быстрые/явные типы
+        if name:find("mox", 1, true) then
+            return "MOX"
+        elseif name:find("uranium", 1, true) then
+            return "Уран"
+        elseif name:find("plutonium", 1, true) then
+            return "Плутоний"
+        elseif name:find("thorium", 1, true) then
+            return "Торий"
+        elseif name:find("californium", 1, true) then
+            return "Калифорний"
+        elseif name:find("xirdal", 1, true) or name:find("ksir", 1, true) then
+            -- в некоторых сборках встречается сокращение вида "ksir..."
+            return "Ксирдалий"
+        end
+
+        -- fallback: хвост после ':' + чистка служебных слов
+        local tail = name:match(":(.+)$") or name
+        tail = tail:gsub("_", " ")
+        tail = tail:gsub("%f[%a]fuel%f[%A]", "")
+        tail = tail:gsub("%f[%a]rod%f[%A]", "")
+        tail = tail:gsub("%f[%a]reactor%f[%A]", "")
+        tail = tail:gsub("%f[%a]htc%f[%A]", "")
+        tail = tail:gsub("%f[%a]reactors%f[%A]", "")
+        tail = tail:gsub("%f[%a]fuelrod%f[%A]", "")
+        tail = tail:gsub("%f[%a]fuel rod%f[%A]", "")
+        tail = tail:gsub("%f[%a]quad%f[%A]", "")
+        tail = tail:gsub("%f[%a]double%f[%A]", "")
+        tail = tail:gsub("%f[%a]single%f[%A]", "")
+        tail = tail:gsub("%f[%a]depleted%f[%A]", "")
+        tail = tail:gsub("%s+", " ")
+        tail = tail:gsub("^%s+", ""):gsub("%s+$", "")
+
+        if tail == "" then
+            return nil
+        end
+        return tail
+    end
+
     local proxy = reactors_proxy[i]
     if not proxy then
         return nil
@@ -1323,27 +1368,7 @@ local function computeRodsResourceForReactor(i)
     end
 
     for itemId, _ in pairs(agg) do
-        local name = tostring(itemId or ""):lower()
-        local label = nil
-        if name:find("mox", 1, true) then
-            label = "MOX"
-        elseif name:find("uranium", 1, true) then
-            label = "Уран"
-        elseif name:find("plutonium", 1, true) then
-            label = "Плутоний"
-        elseif name:find("thorium", 1, true) then
-            label = "Торий"
-        end
-
-        if not label or label == "" then
-            -- fallback: часть после ':' и слегка нормализуем
-            local tail = name:match(":(.+)$") or name
-            tail = tail:gsub("_", " ")
-            if tail ~= "" then
-                label = tail
-            end
-        end
-
+        local label = rodTypeLabelFromItemId(itemId)
         if label and label ~= "" then
             typeSet[label] = true
         end
