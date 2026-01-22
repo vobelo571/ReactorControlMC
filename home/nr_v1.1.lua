@@ -1313,11 +1313,9 @@ local function computeRodsResourceForReactor(i)
             return "MOX"
         elseif name:find("uranium", 1, true) then
             return "Уран"
-        elseif name:find("plutonium", 1, true) then
-            return "Плутоний"
         elseif name:find("thorium", 1, true) then
             return "Торий"
-        elseif name:find("californium", 1, true) then
+        elseif name:find("californium", 1, true) or name:find("californi", 1, true) then
             return "Калифорний"
         elseif name:find("xirdal", 1, true) or name:find("ksir", 1, true) then
             -- в некоторых сборках встречается сокращение вида "ksir..."
@@ -1342,6 +1340,10 @@ local function computeRodsResourceForReactor(i)
         tail = tail:gsub("^%s+", ""):gsub("%s+$", "")
 
         if tail == "" then
+            return nil
+        end
+        -- пользователь просил не выводить "Плутоний"
+        if tail:find("plutonium", 1, true) then
             return nil
         end
         return tail
