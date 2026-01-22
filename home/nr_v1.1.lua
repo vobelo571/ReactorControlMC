@@ -98,6 +98,7 @@ local reactor_maxcoolant = {}
 local reactor_depletionTime = {}
 local reactor_ConsumptionPerSecond = {}
 local reactor_level = {}
+local reactor_component_types = {"htc_reactors"}
 -- Короткая сводка по стержням (обновляется постепенно)
 local rods_cache = {
     res_avg = {},
@@ -475,12 +476,50 @@ local function switchTheme(val)
     end
 end
 
+local function isReactorProxy(proxy)
+    if not proxy then
+        return false
+    end
+    return (proxy.hasWork ~= nil and proxy.getEnergyGeneration ~= nil)
+        or (proxy.hasWork ~= nil and proxy.isActiveCooling ~= nil)
+        or (proxy.getAllFuelRodsStatus ~= nil and proxy.getEnergyGeneration ~= nil)
+end
+
+local function listReactorAddresses()
+    local addresses = {}
+
+    -- Основной тип компонента
+    for _, ctype in ipairs(reactor_component_types) do
+        for address in component.list(ctype) do
+            table.insert(addresses, address)
+        end
+    end
+
+    -- Фоллбек: если тип изменился, ищем реактороподобные компоненты
+    if #addresses == 0 then
+        for address, ctype in component.list() do
+            if type(ctype) == "string" then
+                local lower = ctype:lower()
+                if lower:find("reactor", 1, true) or lower:find("htc", 1, true) then
+                    local proxy = component.proxy(address)
+                    if isReactorProxy(proxy) then
+                        table.insert(addresses, address)
+                    end
+                end
+            end
+        end
+    end
+
+    return addresses
+end
+
 local function initReactors()
     reactors = 0
     reactor_address = {}
     reactors_proxy = {}
 
-    for address, ctype in component.list("htc_reactors") do
+    local addresses = listReactorAddresses()
+    for _, address in ipairs(addresses) do
         reactors = reactors + 1
         reactor_address[reactors] = address
         reactors_proxy[reactors] = component.proxy(address)
@@ -2545,15 +2584,13 @@ _G.__NR_ON_INTERRUPT__ = function()
 end
 
 local function reactorsChanged()
-    local currentCount = 0
     local current = {}
-
-    for address in component.list("htc_reactors") do
+    local addresses = listReactorAddresses()
+    for _, address in ipairs(addresses) do
         current[address] = true
-        currentCount = currentCount + 1
     end
 
-    if currentCount ~= reactors then
+    if #addresses ~= reactors then
         return true
     end
 
@@ -4077,7 +4114,7 @@ local function mainLoop()
 
         local now = computer.uptime()
 
-        if reactors > 0 and reactorsChanged() then
+        if reactorsChanged() then
             os.sleep(1)
             initReactors()
             applyWidgetLayout()
