@@ -487,10 +487,17 @@ end
 
 local function listReactorAddresses()
     local addresses = {}
+    local seen = {}
+    local function add(addr)
+        if addr and not seen[addr] then
+            seen[addr] = true
+            table.insert(addresses, addr)
+        end
+    end
 
     for _, ctype in ipairs(reactor_component_types) do
         for address in component.list(ctype) do
-            table.insert(addresses, address)
+            add(address)
         end
     end
 
@@ -501,9 +508,19 @@ local function listReactorAddresses()
                 if lower:find("reactor", 1, true) or lower:find("htc", 1, true) then
                     local proxy = component.proxy(address)
                     if isReactorProxy(proxy) then
-                        table.insert(addresses, address)
+                        add(address)
                     end
                 end
+            end
+        end
+    end
+
+    -- Если реакторы не зарегистрированы как компоненты — пробуем адаптеры
+    if #addresses == 0 then
+        for address in component.list("adapter") do
+            local proxy = component.proxy(address)
+            if isReactorProxy(proxy) then
+                add(address)
             end
         end
     end
