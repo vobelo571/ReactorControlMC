@@ -506,8 +506,8 @@ local function listReactorAddresses()
             if type(ctype) == "string" then
                 local lower = ctype:lower()
                 if lower:find("reactor", 1, true) or lower:find("htc", 1, true) then
-                    local proxy = component.proxy(address)
-                    if isReactorProxy(proxy) then
+                    local ok, proxy = pcall(component.proxy, address)
+                    if ok and isReactorProxy(proxy) then
                         add(address)
                     end
                 end
@@ -515,11 +515,11 @@ local function listReactorAddresses()
         end
     end
 
-    -- Если реакторы не зарегистрированы как компоненты — пробуем адаптеры
+    -- Фоллбек: если реакторы не зарегистрированы как компоненты — пробуем адаптеры
     if #addresses == 0 then
         for address in component.list("adapter") do
-            local proxy = component.proxy(address)
-            if isReactorProxy(proxy) then
+            local ok, proxy = pcall(component.proxy, address)
+            if ok and isReactorProxy(proxy) then
                 add(address)
             end
         end
