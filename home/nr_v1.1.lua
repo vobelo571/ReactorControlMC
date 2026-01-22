@@ -4077,7 +4077,7 @@ local function mainLoop()
 
         local now = computer.uptime()
 
-        if reactorsChanged() then
+        if reactors > 0 and reactorsChanged() then
             os.sleep(1)
             initReactors()
             applyWidgetLayout()
